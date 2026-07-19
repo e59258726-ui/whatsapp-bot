@@ -18,7 +18,11 @@ console.log(`  ✅ BOT_TOKEN: ${process.env.BOT_TOKEN.substring(0, 10)}...`);
 console.log(`  ✅ DATABASE_URL: ${process.env.DATABASE_URL ? 'установлен' : 'НЕ УСТАНОВЛЕН'}`);
 console.log('═══════════════════════════════════════');
 
-const bot = new TelegramBot();
+// ✅ СОЗДАЕМ ЭКЗЕМПЛЯР БОТА
+const botInstance = new TelegramBot();
+const bot = botInstance.bot; // Получаем Telegraf бота
+const db = botInstance.db;
+
 const app = express();
 app.use(express.json());
 
@@ -29,27 +33,27 @@ app.use((req, res, next) => {
 
 async function startBot() {
     try {
-        console.log('🔄 Подключение к базе данных...');
-        await bot.db.connect();
-        console.log('✅ База данных подключена');
+        // ✅ ЗАПУСКАЕМ БОТА (он сам подключит БД)
+        await botInstance.start();
+        console.log('✅ Бот запущен');
 
         const webhookUrl = `https://whatsapp-bot-f96e.onrender.com/webhook`;
         console.log(`🔗 Установка вебхука: ${webhookUrl}`);
 
-        await bot.bot.telegram.deleteWebhook();
+        await bot.telegram.deleteWebhook();
         console.log('✅ Старый вебхук удален');
 
-        await bot.bot.telegram.setWebhook(webhookUrl);
+        await bot.telegram.setWebhook(webhookUrl);
         console.log('✅ Новый вебхук установлен');
 
-        const webhookInfo = await bot.bot.telegram.getWebhookInfo();
+        const webhookInfo = await bot.telegram.getWebhookInfo();
         console.log('📊 Информация о вебхуке:', JSON.stringify(webhookInfo, null, 2));
 
         // Эндпоинты
         app.post('/webhook', async (req, res) => {
             try {
                 console.log('📨 Получено обновление');
-                await bot.bot.handleUpdate(req.body);
+                await bot.handleUpdate(req.body);
                 res.sendStatus(200);
             } catch (error) {
                 console.error('❌ Ошибка вебхука:', error);
@@ -67,7 +71,7 @@ async function startBot() {
             console.log(`🔗 Webhook: ${webhookUrl}`);
         });
 
-        const me = await bot.bot.telegram.getMe();
+        const me = await bot.telegram.getMe();
         console.log('═══════════════════════════════════════');
         console.log(`✅ БОТ @${me.username} ЗАПУЩЕН!`);
         console.log(`🆔 ID: ${me.id}`);
@@ -85,12 +89,12 @@ startBot();
 
 process.on('SIGINT', async () => {
     console.log('\n⏹ Остановка...');
-    await bot.stop();
+    await botInstance.stop();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
     console.log('\n⏹ Остановка...');
-    await bot.stop();
+    await botInstance.stop();
     process.exit(0);
 });
