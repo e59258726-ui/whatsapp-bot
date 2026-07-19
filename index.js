@@ -1,4 +1,3 @@
-// index.js
 const TelegramBot = require('./src/bot');
 const express = require('express');
 require('dotenv').config();
@@ -18,10 +17,8 @@ console.log(`  ✅ BOT_TOKEN: ${process.env.BOT_TOKEN.substring(0, 10)}...`);
 console.log(`  ✅ DATABASE_URL: ${process.env.DATABASE_URL ? 'установлен' : 'НЕ УСТАНОВЛЕН'}`);
 console.log('═══════════════════════════════════════');
 
-// ✅ СОЗДАЕМ ЭКЗЕМПЛЯР БОТА
 const botInstance = new TelegramBot();
-const bot = botInstance.bot; // Получаем Telegraf бота
-const db = botInstance.db;
+const bot = botInstance.bot;
 
 const app = express();
 app.use(express.json());
@@ -33,7 +30,6 @@ app.use((req, res, next) => {
 
 async function startBot() {
     try {
-        // ✅ ЗАПУСКАЕМ БОТА (он сам подключит БД)
         await botInstance.start();
         console.log('✅ Бот запущен');
 
@@ -49,7 +45,6 @@ async function startBot() {
         const webhookInfo = await bot.telegram.getWebhookInfo();
         console.log('📊 Информация о вебхуке:', JSON.stringify(webhookInfo, null, 2));
 
-        // Эндпоинты
         app.post('/webhook', async (req, res) => {
             try {
                 console.log('📨 Получено обновление');
