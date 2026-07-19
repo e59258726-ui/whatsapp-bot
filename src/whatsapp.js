@@ -1,4 +1,6 @@
 // src/whatsapp.js
+const puppeteer = require('puppeteer-core'); // <-- ВАЖНО: core
+const edgePaths = require('edge-paths');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -44,7 +46,7 @@ class WhatsAppClient {
             }),
             puppeteer: {
                 executablePath: executablePath || undefined,
-                headless: true,
+                headless: 'new', // новый безголовый режим
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -103,11 +105,25 @@ class WhatsAppClient {
     }
 
     // ============================================
-    // ПОИСК MICROSOFT EDGE (ПРИОРИТЕТ)
+    // ПОИСК MICROSOFT EDGE С edge-paths
     // ============================================
     findBrowser() {
+        console.log('🔍 Поиск браузера (приоритет: Microsoft Edge)...');
+        
+        // === 1. ПРОВЕРЯЕМ edge-paths ===
+        try {
+            const edgePath = edgePaths.getEdgePath();
+            if (edgePath && fs.existsSync(edgePath)) {
+                console.log(`✅ Найден Microsoft Edge через edge-paths: ${edgePath}`);
+                return edgePath;
+            }
+        } catch (error) {
+            console.log(`⚠️ edge-paths не нашел Edge: ${error.message}`);
+        }
+
+        // === 2. ПРОВЕРЯЕМ ВСЕ ВОЗМОЖНЫЕ ПУТИ ===
         const possiblePaths = [
-            // === MICROSOFT EDGE (ПРИОРИТЕТ) ===
+            // Microsoft Edge (Linux)
             '/usr/bin/microsoft-edge-stable',
             '/usr/bin/microsoft-edge',
             '/usr/bin/microsoft-edge-beta',
@@ -120,23 +136,19 @@ class WhatsAppClient {
             'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
             // MacOS
             '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-            
-            // === CHROMIUM (ЗАПАСНОЙ) ===
+            // Chromium (запасной)
             '/usr/bin/chromium-browser',
             '/usr/bin/chromium',
             '/usr/bin/chrome',
             '/usr/bin/google-chrome',
             '/usr/bin/google-chrome-stable',
-            
-            // === ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ===
+            // Переменные окружения
             process.env.PUPPETEER_EXECUTABLE_PATH,
             process.env.EDGE_PATH,
             process.env.CHROME_PATH,
             process.env.CHROME_BIN
         ];
 
-        console.log('🔍 Поиск браузера (приоритет: Microsoft Edge)...');
-        
         for (const p of possiblePaths) {
             if (p && fs.existsSync(p)) {
                 const isEdge = p.toLowerCase().includes('edge') || p.toLowerCase().includes('msedge');
@@ -145,7 +157,7 @@ class WhatsAppClient {
             }
         }
 
-        // Пробуем найти через which (приоритет Edge)
+        // === 3. ПРОБУЕМ ЧЕРЕЗ which ===
         try {
             const { execSync } = require('child_process');
             const cmds = [
@@ -170,7 +182,7 @@ class WhatsAppClient {
             }
         } catch (error) {}
 
-        // Windows: поиск через where
+        // === 4. Windows: поиск через where ===
         try {
             const { execSync } = require('child_process');
             if (process.platform === 'win32') {
@@ -182,7 +194,7 @@ class WhatsAppClient {
             }
         } catch (error) {}
 
-        console.log('❌ Microsoft Edge не найден, используется встроенный Chromium');
+        console.log('❌ Браузер не найден, используется встроенный Chromium');
         return null;
     }
 
