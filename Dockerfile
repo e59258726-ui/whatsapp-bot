@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-# Устанавливаем зависимости и Microsoft Edge
+# Устанавливаем Microsoft Edge
 RUN apk add --no-cache \
     curl \
     gnupg \
