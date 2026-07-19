@@ -13,13 +13,11 @@ class WhatsAppClient extends EventEmitter {
         this.isAuthenticated = false;
         this.isReady = false;
         this.telegramCtx = null;
-        this.telegramBot = null;
     }
 
     async start() {
         console.log(`🚀 Запуск клиента для ${this.phone} (метод: ${this.method})`);
-        
-        // Настройки для Puppeteer
+
         const puppeteerConfig = {
             headless: 'new',
             args: [
@@ -34,60 +32,47 @@ class WhatsAppClient extends EventEmitter {
             ]
         };
 
-        // Создаем клиент
         this.client = new Client({
             authStrategy: new LocalAuth({
                 dataPath: `./sessions/${this.phone}`
             }),
             puppeteer: puppeteerConfig,
-            // Для парного кода
             qrMaxRetries: 3,
             takeoverOnConflict: true,
             takeoverTimeoutMs: 0
         });
 
-        // ✅ ОБРАБОТЧИК QR-КОДА
+        // ✅ QR-КОД
         this.client.on('qr', async (qr) => {
             console.log('📱 QR-код сгенерирован');
             this.qrCode = qr;
-            
-            // Отправляем QR только если выбран метод QR
+
             if (this.telegramCtx && this.method === 'qr') {
                 try {
                     const qrImage = await QRCode.toBuffer(qr);
                     await this.telegramCtx.replyWithPhoto(
                         { source: qrImage },
                         {
-                            caption: `📱 <b>QR код для связывания</b>\n\n` +
-                                    `Аккаунт: <b>${this.phone}</b>\n\n` +
-                                    `📲 Отсканируйте в WhatsApp Web\n` +
-                                    `⏳ Код действителен 2 минуты\n\n` +
-                                    `Или выберите <b>"Связать по номеру телефона"</b>`,
-                            parse_mode: 'HTML',
-                            ...this.getAuthKeyboard()
+                            caption: `📱 <b>QR код для связывания</b>\n\nАккаунт: <b>${this.phone}</b>\n\n📲 Отсканируйте в WhatsApp Web\n⏳ Действует 2 минуты`,
+                            parse_mode: 'HTML'
                         }
                     );
                     console.log(`✅ QR-код отправлен в Telegram для ${this.phone}`);
                 } catch (error) {
                     console.error('❌ Ошибка отправки QR:', error);
-                    await this.telegramCtx.reply('❌ Ошибка отправки QR-кода. Попробуйте метод "Код из WhatsApp"');
                 }
-            } else if (this.method === 'qr') {
-                console.log('⚠️ telegramCtx не установлен! QR не отправлен');
             }
         });
 
-        // ✅ ОБРАБОТЧИК ПАРНОГО КОДА (8-значный код)
+        // ✅ 8-ЗНАЧНЫЙ КОД
         this.client.on('pairing_code', async (code) => {
             console.log(`🔢 Парный код для ${this.phone}: ${code}`);
             this.pairingCode = code;
-            
-            // Отправляем код только если выбран метод code
+
             if (this.telegramCtx && this.method === 'code') {
                 try {
-                    // Форматируем код: HZ5F-3VF9
                     const formattedCode = code.slice(0, 4) + '-' + code.slice(4);
-                    
+
                     await this.telegramCtx.replyWithHTML(`
 <b>🔐 Введите код на телефоне</b>
 
@@ -107,34 +92,27 @@ class WhatsAppClient extends EventEmitter {
                     console.log(`✅ Код ${formattedCode} отправлен в Telegram для ${this.phone}`);
                 } catch (error) {
                     console.error('❌ Ошибка отправки кода:', error);
-                    await this.telegramCtx.reply(`❌ Ошибка отправки кода: ${error.message}`);
                 }
-            } else if (this.method === 'code') {
-                console.log('⚠️ telegramCtx не установлен! Код не отправлен');
             }
         });
 
-        // ✅ АВТОРИЗАЦИЯ УСПЕШНА
-        this.client.on('authenticated', (session) => {
+        this.client.on('authenticated', () => {
             console.log(`✅ ${this.phone} авторизован!`);
             this.isAuthenticated = true;
-            this.emit('authenticated', session);
+            this.emit('authenticated');
         });
 
-        // ✅ КЛИЕНТ ГОТОВ
         this.client.on('ready', () => {
-            console.log(`🟢 ${this.phone} готов к работе`);
+            console.log(`🟢 ${this.phone} готов`);
             this.isReady = true;
             this.emit('ready');
         });
 
-        // ✅ ОШИБКА АВТОРИЗАЦИИ
         this.client.on('auth_failure', (error) => {
-            console.error(`❌ Ошибка авторизации ${this.phone}:`, error);
+            console.error(`❌ Ошибка ${this.phone}:`, error);
             this.emit('auth_failure', error);
         });
 
-        // ✅ ОТКЛЮЧЕНИЕ
         this.client.on('disconnected', (reason) => {
             console.log(`🔌 ${this.phone} отключен:`, reason);
             this.isAuthenticated = false;
@@ -142,23 +120,10 @@ class WhatsAppClient extends EventEmitter {
             this.emit('disconnected', reason);
         });
 
-        // ✅ ИЗМЕНЕНИЕ КОДА
-        this.client.on('change_code', (newCode) => {
-            console.log(`🔄 Код изменен для ${this.phone}: ${newCode}`);
-            this.pairingCode = newCode;
-        });
-
-        // Запускаем клиент
-        try {
-            await this.client.initialize();
-            console.log(`✅ Клиент ${this.phone} инициализирован`);
-        } catch (error) {
-            console.error(`❌ Ошибка инициализации ${this.phone}:`, error);
-            throw error;
-        }
+        await this.client.initialize();
+        console.log(`✅ Клиент ${this.phone} инициализирован`);
     }
 
-    // Получить QR-код
     async getQRCode() {
         if (this.qrCode) {
             try {
@@ -171,35 +136,18 @@ class WhatsAppClient extends EventEmitter {
         return null;
     }
 
-    // Получить парный код
     async getPairingCode() {
         return this.pairingCode;
     }
 
-    // Проверить авторизацию
     isAuthenticated() {
         return this.isAuthenticated;
     }
 
-    // Проверить готовность
     isReady() {
         return this.isReady;
     }
 
-    // Клавиатура для авторизации
-    getAuthKeyboard() {
-        return {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '✅ Всё готово', callback_data: 'auth_ready' }],
-                    [{ text: '🔄 Показать QR', callback_data: 'auth_show_qr' }],
-                    [{ text: '❌ Отмена', callback_data: 'auth_cancel' }]
-                ]
-            }
-        };
-    }
-
-    // Остановка клиента
     async stop() {
         if (this.client) {
             try {
