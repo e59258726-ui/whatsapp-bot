@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: whatsapp-bot
+    runtime: image
+    repo: https://github.com/your-username/whatsapp-bot
+    branch: main
+    plan: free
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium-browser
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: true
+    buildCommand: |
+      apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont
+      npm install --production --no-audit --no-fund
+      mkdir -p sessions logs
+    startCommand: node index.js
