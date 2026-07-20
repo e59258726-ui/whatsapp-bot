@@ -13,12 +13,15 @@ class ProgressService {
         this.processedAccounts = 0;
         this.isComplete = false;
         this.bot = null;
-        this.messageQueue = [];
-        this.currentIndex = 0;
+        this.clientsMap = null;
     }
 
     setBot(bot) {
         this.bot = bot;
+    }
+
+    setClients(clients) {
+        this.clientsMap = clients;
     }
 
     async start() {
@@ -41,7 +44,6 @@ class ProgressService {
         if (!this.isRunning) return;
 
         try {
-            // Получаем все авторизованные аккаунты
             const accounts = await this.db.getAccounts();
             const authorized = accounts.filter(a => a.is_authenticated);
 
@@ -62,17 +64,14 @@ class ProgressService {
             this.totalAccounts = authorized.length;
             console.log(`📨 Найдено ${authorized.length} аккаунтов`);
 
-            // Перемешиваем аккаунты для случайного порядка
             const shuffled = authorized.sort(() => Math.random() - 0.5);
-
-            // Каждый аккаунт отправляет сообщение следующему
             let processed = 0;
             
             for (let i = 0; i < shuffled.length; i++) {
                 if (!this.isRunning) break;
 
                 const fromAccount = shuffled[i];
-                const toAccount = shuffled[(i + 1) % shuffled.length]; // Следующий по кругу
+                const toAccount = shuffled[(i + 1) % shuffled.length];
 
                 try {
                     const messageType = this.getRandomMessageType();
@@ -85,7 +84,6 @@ class ProgressService {
                     
                     console.log(`💬 [${messageType}] ${fromAccount.phone} → ${toAccount.phone}: ${message.substring(0, 50)}...`);
                     
-                    // Задержка между сообщениями
                     const delay = Math.floor(Math.random() * 30000) + 10000;
                     await this.sleep(delay);
                     
@@ -94,14 +92,12 @@ class ProgressService {
                 }
             }
 
-            // Если все аккаунты обработаны и прогрев еще запущен
             if (processed >= shuffled.length && this.isRunning) {
                 console.log('✅ Все аккаунты обработаны!');
                 await this.completeProgress();
                 return;
             }
 
-            // Если остались необработанные
             if (processed < shuffled.length && this.isRunning) {
                 console.log(`⏳ Осталось ${shuffled.length - processed} аккаунтов`);
                 setTimeout(() => this.runProgressLoop(), 5000);
@@ -122,7 +118,6 @@ class ProgressService {
         const duration = Math.round((new Date() - this.startTime) / 1000 / 60);
         
         console.log(`✅ Прогрев завершен! Отправлено ${this.messagesSent} сообщений за ${duration} минут`);
-        
         await this.sendCompleteNotification(duration);
     }
 
@@ -135,8 +130,7 @@ class ProgressService {
             
             let accountsList = '';
             for (const acc of authorized) {
-                const status = acc.is_authenticated ? '🟢' : '🔴';
-                accountsList += `  ${status} ${acc.phone}\n`;
+                accountsList += `  🟢 ${acc.phone}\n`;
             }
             
             const message = 
@@ -161,9 +155,9 @@ class ProgressService {
         try {
             if (!this.bot) return;
             const adminChatId = process.env.ADMIN_CHAT_ID || 8946090726;
-await this.bot.bot.telegram.sendMessage(adminChatId, message, {
-    parse_mode: 'HTML'  // или вообще убрать parse_mode
-});
+            await this.bot.bot.telegram.sendMessage(adminChatId, message, {
+                parse_mode: 'Markdown'
+            });
         } catch (error) {
             console.error('❌ Ошибка отправки уведомления:', error);
         }
@@ -217,7 +211,7 @@ await this.bot.bot.telegram.sendMessage(adminChatId, message, {
         try {
             switch (type) {
                 case 'text':
-                    return await this.gemini.generateConversation(fromPhone, toPhone);
+                    return await this.gemini.generateTextMessage(fromPhone, toPhone);
                 case 'smile':
                     return await this.gemini.generateSmileMessage(fromPhone, toPhone);
                 case 'voice':
@@ -248,10 +242,41 @@ await this.bot.bot.telegram.sendMessage(adminChatId, message, {
         try {
             console.log(`📨 [${type}] ${fromAccount.phone} → ${toAccount.phone}: ${message}`);
             
-            // Сохраняем в базу данных
-            await this.db.saveMessage(null, fromAccount.id, toAccount.id, message, type);
-            await this.db.incrementMessages(null);
+            if (!this.clientsMap) {
+                console.log('❌ Клиенты не доступны');
+                return;
+            }
             
+            const fromClient = this.clientsMap.get(fromAccount.phone);
+            
+            if (!fromClient) {
+                console.log(`❌ Клиент не найден для ${fromAccount.phone}`);
+                await this.db.updateAccountStatus(fromAccount.phone, false);
+                return;
+            }
+            
+            if (!fromClient.isAuthenticated) {
+                console.log(`❌ Клиент ${fromAccount.phone} не авторизован`);
+                await this.db.updateAccountStatus(fromAccount.phone, false);
+                return;
+            }
+            
+            try {
+                await fromClient.sendMessage(toAccount.phone, message);
+                console.log(`✅ Сообщение отправлено: ${fromAccount.phone} → ${toAccount.phone}`);
+                await this.db.saveMessage(fromAccount.id, toAccount.id, message, type);
+                await this.db.incrementMessages();
+            } catch (sendError) {
+                console.error(`❌ Ошибка отправки:`, sendError);
+                if (sendError.message.includes('Не авторизован')) {
+                    await this.db.updateAccountStatus(fromAccount.phone, false);
+                    if (this.bot) {
+                        await this.bot.sendNotification(
+                            `⚠️ Аккаунт ${fromAccount.phone} потерял авторизацию!`
+                        );
+                    }
+                }
+            }
         } catch (error) {
             console.error(`❌ Ошибка отправки:`, error);
         }
