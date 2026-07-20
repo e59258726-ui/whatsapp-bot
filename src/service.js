@@ -9,6 +9,16 @@ class ProgressService {
         this.messagesSent = 0;
         this.startTime = null;
         this.interval = null;
+        this.totalAccounts = 0;
+        this.processedAccounts = 0;
+        this.isComplete = false;
+        this.bot = null;
+        this.messageQueue = [];
+        this.currentIndex = 0;
+    }
+
+    setBot(bot) {
+        this.bot = bot;
     }
 
     async start() {
@@ -21,105 +31,82 @@ class ProgressService {
         this.isRunning = true;
         this.startTime = new Date();
         this.messagesSent = 0;
+        this.isComplete = false;
+        this.processedAccounts = 0;
 
-        await this.autoCreatePairs();
         await this.runProgressLoop();
-    }
-
-    async autoCreatePairs() {
-        try {
-            console.log('🔄 Автоматическое создание пар...');
-            
-            const accounts = await this.db.getAccounts();
-            const authorized = accounts.filter(a => a.is_authenticated);
-            
-            if (authorized.length < 2) {
-                console.log(`⚠️ Нужно минимум 2 аккаунта. Сейчас: ${authorized.length}`);
-                return;
-            }
-            
-            const shuffled = authorized.sort(() => Math.random() - 0.5);
-            
-            let pairsCreated = 0;
-            for (let i = 0; i < shuffled.length - 1; i += 2) {
-                const acc1 = shuffled[i];
-                const acc2 = shuffled[i + 1];
-                
-                try {
-                    const existing = await this.db.pool.query(
-                        'SELECT * FROM pairs WHERE (account1_id = $1 AND account2_id = $2) OR (account1_id = $2 AND account2_id = $1)',
-                        [acc1.id, acc2.id]
-                    );
-                    
-                    if (existing.rows.length === 0) {
-                        await this.db.createPair(acc1.id, acc2.id);
-                        pairsCreated++;
-                        console.log(`✅ Пара создана: ${acc1.phone} ↔ ${acc2.phone}`);
-                    }
-                } catch (error) {
-                    console.error(`❌ Ошибка создания пары:`, error);
-                }
-            }
-            
-            console.log(`✅ Создано ${pairsCreated} пар`);
-            
-        } catch (error) {
-            console.error('❌ Ошибка autoCreatePairs:', error);
-        }
-    }
-
-    async stop() {
-        if (!this.isRunning) {
-            console.log('⚠️ Прогрев не запущен');
-            return;
-        }
-
-        console.log('⏹ Остановка сервиса прогрева');
-        this.isRunning = false;
-        if (this.interval) {
-            clearInterval(this.interval);
-            this.interval = null;
-        }
     }
 
     async runProgressLoop() {
         if (!this.isRunning) return;
 
         try {
-            const pairs = await this.db.getPairs();
-            const activePairs = pairs.filter(p => p.is_active);
+            // Получаем все авторизованные аккаунты
+            const accounts = await this.db.getAccounts();
+            const authorized = accounts.filter(a => a.is_authenticated);
 
-            if (activePairs.length === 0) {
-                console.log('⚠️ Нет активных пар. Создаю автоматически...');
-                await this.autoCreatePairs();
-                setTimeout(() => this.runProgressLoop(), 5000);
+            if (authorized.length < 2) {
+                console.log(`⚠️ Нужно минимум 2 аккаунта. Сейчас: ${authorized.length}`);
+                if (this.bot) {
+                    await this.sendNotification(
+                        `⚠️ *Недостаточно аккаунтов для прогрева!*\n\n` +
+                        `📱 Нужно минимум 2 аккаунта.\n` +
+                        `📱 Сейчас: ${authorized.length}\n\n` +
+                        `➕ Добавьте аккаунты через "➕ Добавить аккаунт"`
+                    );
+                }
+                this.isRunning = false;
                 return;
             }
 
-            console.log(`📨 Найдено ${activePairs.length} активных пар`);
+            this.totalAccounts = authorized.length;
+            console.log(`📨 Найдено ${authorized.length} аккаунтов`);
 
-            for (const pair of activePairs) {
+            // Перемешиваем аккаунты для случайного порядка
+            const shuffled = authorized.sort(() => Math.random() - 0.5);
+
+            // Каждый аккаунт отправляет сообщение следующему
+            let processed = 0;
+            
+            for (let i = 0; i < shuffled.length; i++) {
                 if (!this.isRunning) break;
+
+                const fromAccount = shuffled[i];
+                const toAccount = shuffled[(i + 1) % shuffled.length]; // Следующий по кругу
 
                 try {
                     const messageType = this.getRandomMessageType();
-                    const message = await this.generateMessage(pair, messageType);
+                    const message = await this.generateMessage(fromAccount, toAccount, messageType);
                     
-                    await this.sendMessageToPair(pair, message);
+                    await this.sendMessage(fromAccount, toAccount, message, messageType);
                     this.messagesSent++;
+                    processed++;
+                    this.processedAccounts = processed;
                     
-                    console.log(`💬 [${messageType}] ${pair.phone1} → ${pair.phone2}: ${message.substring(0, 50)}...`);
+                    console.log(`💬 [${messageType}] ${fromAccount.phone} → ${toAccount.phone}: ${message.substring(0, 50)}...`);
                     
+                    // Задержка между сообщениями
                     const delay = Math.floor(Math.random() * 30000) + 10000;
                     await this.sleep(delay);
+                    
                 } catch (error) {
-                    console.error(`❌ Ошибка для пары ${pair.id}:`, error);
+                    console.error(`❌ Ошибка при отправке от ${fromAccount.phone}:`, error);
                 }
             }
 
-            if (this.isRunning) {
+            // Если все аккаунты обработаны и прогрев еще запущен
+            if (processed >= shuffled.length && this.isRunning) {
+                console.log('✅ Все аккаунты обработаны!');
+                await this.completeProgress();
+                return;
+            }
+
+            // Если остались необработанные
+            if (processed < shuffled.length && this.isRunning) {
+                console.log(`⏳ Осталось ${shuffled.length - processed} аккаунтов`);
                 setTimeout(() => this.runProgressLoop(), 5000);
             }
+
         } catch (error) {
             console.error('❌ Ошибка в цикле прогрева:', error);
             if (this.isRunning) {
@@ -128,27 +115,117 @@ class ProgressService {
         }
     }
 
+    async completeProgress() {
+        this.isRunning = false;
+        this.isComplete = true;
+        
+        const duration = Math.round((new Date() - this.startTime) / 1000 / 60);
+        
+        console.log(`✅ Прогрев завершен! Отправлено ${this.messagesSent} сообщений за ${duration} минут`);
+        
+        await this.sendCompleteNotification(duration);
+    }
+
+    async sendCompleteNotification(duration) {
+        try {
+            if (!this.bot) return;
+            
+            const accounts = await this.db.getAccounts();
+            const authorized = accounts.filter(a => a.is_authenticated);
+            
+            let accountsList = '';
+            for (const acc of authorized) {
+                const status = acc.is_authenticated ? '🟢' : '🔴';
+                accountsList += `  ${status} ${acc.phone}\n`;
+            }
+            
+            const message = 
+                `✅ *ПРОГРЕВ ЗАВЕРШЕН!*\n\n` +
+                `📊 *Статистика:*\n` +
+                `  📱 Аккаунтов: ${authorized.length}\n` +
+                `  💬 Отправлено: ${this.messagesSent} сообщений\n` +
+                `  ⏱️ Время: ${duration} минут\n\n` +
+                `📋 *Аккаунты:*\n${accountsList}\n\n` +
+                `😴 *Аккаунтам нужно отдохнуть!*\n` +
+                `⏳ Рекомендуется подождать 1-2 часа перед следующим прогревом.\n\n` +
+                `🔄 Чтобы запустить снова: /start_progress`;
+            
+            await this.sendNotification(message);
+            
+        } catch (error) {
+            console.error('❌ Ошибка отправки уведомления:', error);
+        }
+    }
+
+    async sendNotification(message) {
+        try {
+            if (!this.bot) return;
+            const adminChatId = process.env.ADMIN_CHAT_ID || 8946090726;
+            await this.bot.bot.telegram.sendMessage(adminChatId, message, {
+                parse_mode: 'Markdown'
+            });
+        } catch (error) {
+            console.error('❌ Ошибка отправки уведомления:', error);
+        }
+    }
+
+    async stop() {
+        if (!this.isRunning && !this.isComplete) {
+            console.log('⚠️ Прогрев не запущен');
+            return;
+        }
+
+        console.log('⏹ Остановка сервиса прогрева');
+        this.isRunning = false;
+        
+        if (!this.isComplete) {
+            await this.sendStopNotification();
+        }
+        
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
+    }
+
+    async sendStopNotification() {
+        try {
+            if (!this.bot) return;
+            
+            const message = 
+                `⏹ *ПРОГРЕВ ОСТАНОВЛЕН ВРУЧНУЮ!*\n\n` +
+                `📊 *Статистика:*\n` +
+                `  💬 Отправлено: ${this.messagesSent} сообщений\n` +
+                `  ⏱️ Время: ${Math.round((new Date() - this.startTime) / 1000 / 60)} минут\n\n` +
+                `🔄 Запустить снова: /start_progress`;
+            
+            await this.sendNotification(message);
+        } catch (error) {
+            console.error('❌ Ошибка отправки уведомления:', error);
+        }
+    }
+
     getRandomMessageType() {
         const types = ['text', 'smile', 'voice', 'photo'];
         return types[Math.floor(Math.random() * types.length)];
     }
 
-    async generateMessage(pair, type) {
-        const phone1 = pair.phone1 || pair.account1?.phone || 'Аккаунт 1';
-        const phone2 = pair.phone2 || pair.account2?.phone || 'Аккаунт 2';
+    async generateMessage(fromAccount, toAccount, type) {
+        const fromPhone = fromAccount.phone;
+        const toPhone = toAccount.phone;
         
         try {
             switch (type) {
                 case 'text':
-                    return await this.gemini.generateTextMessage(phone1, phone2);
+                    return await this.gemini.generateConversation(fromPhone, toPhone);
                 case 'smile':
-                    return await this.gemini.generateSmileMessage(phone1, phone2);
+                    return await this.gemini.generateSmileMessage(fromPhone, toPhone);
                 case 'voice':
-                    return await this.gemini.generateVoiceMessage(phone1, phone2);
+                    return await this.gemini.generateVoiceMessage(fromPhone, toPhone);
                 case 'photo':
-                    return await this.gemini.generatePhotoMessage(phone1, phone2);
+                    return await this.gemini.generatePhotoMessage(fromPhone, toPhone);
                 default:
-                    return await this.gemini.generateTextMessage(phone1, phone2);
+                    return await this.gemini.generateConversation(fromPhone, toPhone);
             }
         } catch (error) {
             console.error('❌ Ошибка генерации сообщения:', error);
@@ -167,10 +244,14 @@ class ProgressService {
         return messages[Math.floor(Math.random() * messages.length)];
     }
 
-    async sendMessageToPair(pair, message) {
+    async sendMessage(fromAccount, toAccount, message, type) {
         try {
-            console.log(`📨 [${pair.id}] ${message}`);
-            await this.db.incrementMessages(pair.id);
+            console.log(`📨 [${type}] ${fromAccount.phone} → ${toAccount.phone}: ${message}`);
+            
+            // Сохраняем в базу данных
+            await this.db.saveMessage(null, fromAccount.id, toAccount.id, message, type);
+            await this.db.incrementMessages(null);
+            
         } catch (error) {
             console.error(`❌ Ошибка отправки:`, error);
         }
@@ -183,10 +264,13 @@ class ProgressService {
     async getStats() {
         return {
             isRunning: this.isRunning,
+            isComplete: this.isComplete,
             messagesSent: this.messagesSent,
             startTime: this.startTime,
             durationHours: this.startTime ? 
-                (new Date() - this.startTime) / (1000 * 60 * 60) : 0
+                (new Date() - this.startTime) / (1000 * 60 * 60) : 0,
+            totalAccounts: this.totalAccounts,
+            processedAccounts: this.processedAccounts
         };
     }
 }
