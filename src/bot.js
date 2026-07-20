@@ -1,4 +1,4 @@
-// src/bot.js - ПОЛНАЯ ВЕРСИЯ БЕЗ ПАР
+// src/bot.js
 const { Telegraf, Markup, session } = require('telegraf');
 const config = require('./config');
 const Database = require('./database');
@@ -58,9 +58,6 @@ class TelegramBot {
         });
     }
 
-    // ============================================
-    // КЛАВИАТУРЫ
-    // ============================================
     getMainKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('📊 Статистика', 'main_stats')],
@@ -93,16 +90,13 @@ class TelegramBot {
 
     getSettingsKeyboard() {
         return Markup.inlineKeyboard([
-            [Markup.button.callback('🕐 6 часов', 'set_6')],
-            [Markup.button.callback('🕐 12 часов', 'set_12')],
-            [Markup.button.callback('🕐 24 часа', 'set_24')],
+            [Markup.button.callback('⏱️ Время прогрева', 'settings_time')],
+            [Markup.button.callback('📨 Скорость отправки', 'settings_speed')],
+            [Markup.button.callback('🔄 Циклы (актив/отдых)', 'settings_cycles')],
             [Markup.button.callback('🔙 Назад', 'back_main')]
         ]);
     }
 
-    // ============================================
-    // КОМАНДЫ
-    // ============================================
     setupCommands() {
         this.bot.use(async (ctx, next) => {
             console.log(`📨 [${new Date().toISOString()}] Сообщение:`, {
@@ -118,39 +112,6 @@ class TelegramBot {
             }
         });
 
-// src/bot.js - добавьте в setupCommands()
-
-// === КОМАНДА ДЛЯ ПРОВЕРКИ СООБЩЕНИЙ ===
-this.bot.command('messages', async (ctx) => {
-    const stats = this.service.gemini.getStats();
-    await ctx.reply(
-        `📝 *Статистика сообщений*\n\n` +
-        `📊 Всего сообщений: ${stats.total}\n` +
-        `📌 Последнее: ${stats.lastMessage}\n\n` +
-        `📁 Файл: messages.txt\n` +
-        `📌 Чтобы добавить сообщения, отредактируйте файл messages.txt`,
-        { parse_mode: 'Markdown' }
-    );
-});
-
-// === КОМАНДА ДЛЯ ДОБАВЛЕНИЯ СООБЩЕНИЯ ===
-this.bot.command('add_message', async (ctx) => {
-    const text = ctx.message.text.replace('/add_message ', '').trim();
-    if (!text) {
-        await ctx.reply('❌ Напишите сообщение после команды\nПример: `/add_message Привет! Как дела?`');
-        return;
-    }
-    
-    const gemini = this.service.gemini;
-    if (gemini.addMessage) {
-        gemini.addMessage(text);
-        await ctx.reply(`✅ Сообщение добавлено!\n\n💬 "${text}"\n\n📁 Всего сообщений: ${gemini.messageLoader.messages.length}`);
-    } else {
-        await ctx.reply('❌ Функция недоступна');
-    }
-});
-
-        
         this.bot.command('start', async (ctx) => {
             console.log(`✅ /start от ${ctx.from.id}`);
             await ctx.reply(
@@ -263,15 +224,42 @@ this.bot.command('add_message', async (ctx) => {
             }
         });
 
+        // === КОМАНДА ДЛЯ ПРОВЕРКИ СООБЩЕНИЙ ===
+        this.bot.command('messages', async (ctx) => {
+            const stats = this.service.gemini.getStats();
+            await ctx.reply(
+                `📝 *Статистика сообщений*\n\n` +
+                `📊 Всего сообщений: ${stats.total}\n` +
+                `📌 Последнее: ${stats.lastMessage}\n\n` +
+                `📁 Файл: messages.txt\n` +
+                `📌 Чтобы добавить сообщения, отредактируйте файл messages.txt`,
+                { parse_mode: 'Markdown' }
+            );
+        });
+
+        // === КОМАНДА ДЛЯ ДОБАВЛЕНИЯ СООБЩЕНИЯ ===
+        this.bot.command('add_message', async (ctx) => {
+            const text = ctx.message.text.replace('/add_message ', '').trim();
+            if (!text) {
+                await ctx.reply('❌ Напишите сообщение после команды\nПример: `/add_message Привет! Как дела?`');
+                return;
+            }
+            
+            const gemini = this.service.gemini;
+            if (gemini.addMessage) {
+                gemini.addMessage(text);
+                await ctx.reply(`✅ Сообщение добавлено!\n\n💬 "${text}"\n\n📁 Всего сообщений: ${gemini.messageLoader.messages.length}`);
+            } else {
+                await ctx.reply('❌ Функция недоступна');
+            }
+        });
+
         this.bot.command('help', async (ctx) => {
             console.log(`🆘 /help от ${ctx.from.id}`);
             await this.showHelp(ctx);
         });
     }
 
-    // ============================================
-    // МЕТОДЫ КОМАНД
-    // ============================================
     async startAddAccount(ctx) {
         const userId = ctx.from.id;
         this.userStates.set(userId, { step: 'waiting_phone', phone: null, name: null });
@@ -321,6 +309,8 @@ this.bot.command('add_message', async (ctx) => {
             '/restart_clients - Перезапустить клиентов\n' +
             '/fix - Восстановить клиентов\n' +
             '/test_send - Тестовая отправка\n' +
+            '/messages - Статистика сообщений\n' +
+            '/add_message - Добавить сообщение\n' +
             '/start_progress - Запустить прогрев\n' +
             '/stop_progress - Остановить прогрев\n' +
             '/help - Помощь',
@@ -366,101 +356,92 @@ this.bot.command('add_message', async (ctx) => {
         );
     }
 
-// src/bot.js - исправленный autoCheckAccounts
-
-async autoCheckAccounts() {
-    try {
-        // Пропускаем проверку, если идет фаза отдыха
-        if (this.service.isResting) {
-            console.log('⏸️ Пропускаем автопроверку (фаза отдыха)');
-            return;
-        }
-        
-        console.log('═══════════════════════════════════════');
-        console.log('🔍 АВТОПРОВЕРКА АККАУНТОВ');
-        console.log(`📅 ${new Date().toLocaleString()}`);
-        console.log('═══════════════════════════════════════');
-        
-        const allAccounts = await this.db.getAccounts();
-        if (allAccounts.length === 0) {
-            console.log('📭 Нет аккаунтов');
-            return;
-        }
-        
-        console.log(`📱 Всего аккаунтов: ${allAccounts.length}`);
-        let onlineCount = 0;
-        let offlineCount = 0;
-        
-        for (const account of allAccounts) {
-            const client = this.clients.get(account.phone);
-            let status = '❌ не проверен';
-            let isAuth = account.is_authenticated;
-            
-            if (client) {
-                try {
-                    // Проверяем с коротким таймаутом
-                    const result = await Promise.race([
-                        client.getAuthStatus(),
-                        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
-                    ]);
-                    
-                    if (result === null) {
-                        status = '⏳ таймаут (пропускаем)';
-                    } else {
-                        isAuth = result;
-                        status = isAuth ? '✅ активен' : '❌ не активен';
-                        // Обновляем статус только если точно знаем
-                        if (isAuth !== account.is_authenticated) {
-                            await this.db.updateAccountStatus(account.phone, isAuth);
-                        }
-                    }
-                } catch (error) {
-                    status = `⚠️ ошибка: ${error.message}`;
-                }
-            } else {
-                // Если клиента нет - не паникуем, просто создаем
-                status = '🔧 создаю клиента...';
-                try {
-                    const restored = await this.restoreClient(account.phone);
-                    isAuth = restored;
-                    status = restored ? '✅ восстановлен' : '❌ не удалось';
-                } catch (error) {
-                    status = `❌ ошибка: ${error.message}`;
-                }
+    async autoCheckAccounts() {
+        try {
+            if (this.service.isResting) {
+                console.log('⏸️ Пропускаем автопроверку (фаза отдыха)');
+                return;
             }
             
-            if (isAuth) onlineCount++;
-            else offlineCount++;
+            console.log('═══════════════════════════════════════');
+            console.log('🔍 АВТОПРОВЕРКА АККАУНТОВ');
+            console.log(`📅 ${new Date().toLocaleString()}`);
+            console.log('═══════════════════════════════════════');
             
-            console.log(`  📱 ${account.phone}: ${status}`);
-        }
-        
-        console.log('═══════════════════════════════════════');
-        console.log(`📊 ИТОГО: ${allAccounts.length} аккаунтов`);
-        console.log(`  🟢 В сети: ${onlineCount}`);
-        console.log(`  🔴 Не в сети: ${offlineCount}`);
-        console.log('═══════════════════════════════════════');
-        
-        // Отправляем уведомление ТОЛЬКО если есть реальные изменения
-        // и не в фазе отдыха
-        if (onlineCount === 0 && allAccounts.length > 0 && !this.service.isResting) {
-            // Проверяем еще раз через 30 секунд перед отправкой
-            setTimeout(async () => {
-                const recheckAccounts = await this.db.getAccounts();
-                const recheckOnline = recheckAccounts.filter(a => a.is_authenticated).length;
-                if (recheckOnline === 0) {
-                    await this.sendNotification(
-                        `⚠️ ВНИМАНИЕ!\n\nВсе аккаунты (${allAccounts.length}) вышли из системы!\n\n🔄 Требуется повторная авторизация.`
-                    );
+            const allAccounts = await this.db.getAccounts();
+            if (allAccounts.length === 0) {
+                console.log('📭 Нет аккаунтов');
+                return;
+            }
+            
+            console.log(`📱 Всего аккаунтов: ${allAccounts.length}`);
+            let onlineCount = 0;
+            let offlineCount = 0;
+            
+            for (const account of allAccounts) {
+                const client = this.clients.get(account.phone);
+                let status = '❌ не проверен';
+                let isAuth = account.is_authenticated;
+                
+                if (client) {
+                    try {
+                        const result = await Promise.race([
+                            client.getAuthStatus(),
+                            new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+                        ]);
+                        
+                        if (result === null) {
+                            status = '⏳ таймаут (пропускаем)';
+                        } else {
+                            isAuth = result;
+                            status = isAuth ? '✅ активен' : '❌ не активен';
+                            if (isAuth !== account.is_authenticated) {
+                                await this.db.updateAccountStatus(account.phone, isAuth);
+                            }
+                        }
+                    } catch (error) {
+                        status = `⚠️ ошибка: ${error.message}`;
+                    }
+                } else {
+                    status = '🔧 создаю клиента...';
+                    try {
+                        const restored = await this.restoreClient(account.phone);
+                        isAuth = restored;
+                        status = restored ? '✅ восстановлен' : '❌ не удалось';
+                    } catch (error) {
+                        status = `❌ ошибка: ${error.message}`;
+                    }
                 }
-            }, 30000);
+                
+                if (isAuth) onlineCount++;
+                else offlineCount++;
+                
+                console.log(`  📱 ${account.phone}: ${status}`);
+            }
+            
+            console.log('═══════════════════════════════════════');
+            console.log(`📊 ИТОГО: ${allAccounts.length} аккаунтов`);
+            console.log(`  🟢 В сети: ${onlineCount}`);
+            console.log(`  🔴 Не в сети: ${offlineCount}`);
+            console.log('═══════════════════════════════════════');
+            
+            if (onlineCount === 0 && allAccounts.length > 0 && !this.service.isResting) {
+                setTimeout(async () => {
+                    const recheckAccounts = await this.db.getAccounts();
+                    const recheckOnline = recheckAccounts.filter(a => a.is_authenticated).length;
+                    if (recheckOnline === 0) {
+                        await this.sendNotification(
+                            `⚠️ ВНИМАНИЕ!\n\nВсе аккаунты (${allAccounts.length}) вышли из системы!\n\n🔄 Требуется повторная авторизация.`
+                        );
+                    }
+                }, 30000);
+            }
+            
+            console.log('✅ Автопроверка завершена');
+        } catch (error) {
+            console.error('❌ Ошибка автопроверки:', error);
         }
-        
-        console.log('✅ Автопроверка завершена');
-    } catch (error) {
-        console.error('❌ Ошибка автопроверки:', error);
     }
-}
 
     async restoreClient(phone) {
         try {
@@ -530,9 +511,6 @@ async autoCheckAccounts() {
         }
     }
 
-    // ============================================
-    // ОБРАБОТЧИКИ ТЕКСТА
-    // ============================================
     setupHandlers() {
         this.bot.on('text', async (ctx) => {
             const userId = ctx.from.id;
@@ -541,7 +519,6 @@ async autoCheckAccounts() {
 
             console.log(`📝 Текст от ${userId}: "${text}"`);
 
-            // Кнопки меню
             if (text === '📊 Статистика') {
                 await this.showStats(ctx);
                 return;
@@ -573,10 +550,7 @@ async autoCheckAccounts() {
                 return;
             }
             if (text === '⚙️ Настройки') {
-                await ctx.reply(
-                    '⚙️ *Настройки*\n\nВыберите время прогрева:',
-                    { parse_mode: 'Markdown', ...this.getSettingsKeyboard() }
-                );
+                await this.showSettings(ctx);
                 return;
             }
             if (text === '🆘 Помощь') {
@@ -590,7 +564,6 @@ async autoCheckAccounts() {
 
             if (!state) return;
 
-            // Ожидание номера
             if (state.step === 'waiting_phone') {
                 if (text === '❌ Отмена') {
                     this.userStates.delete(userId);
@@ -622,7 +595,6 @@ async autoCheckAccounts() {
                 return;
             }
 
-            // Ожидание кода
             if (state.step === 'waiting_code') {
                 const code = text.trim().replace(/[-\s]/g, '').toUpperCase();
                 console.log(`🔢 Получен код: "${code}"`);
@@ -659,7 +631,6 @@ async autoCheckAccounts() {
                 return;
             }
 
-            // Ожидание удаления
             if (state.step === 'waiting_delete') {
                 const phone = text.trim();
                 if (!phone.match(/^\+?\d{10,15}$/)) {
@@ -681,9 +652,116 @@ async autoCheckAccounts() {
         });
     }
 
-    // ============================================
-    // ОТОБРАЖЕНИЕ ДАННЫХ
-    // ============================================
+    async showSettings(ctx) {
+        const speed = config.SEND_SPEED || 'medium';
+        const speedText = {
+            'slow': '🐢 Медленно (2-5 мин)',
+            'medium': '🚶 Средне (1-3 мин)',
+            'fast': '🏃 Быстро (30-60 сек)',
+            'human': '👤 Как человек (1-5 мин)'
+        }[speed] || 'Средне';
+        
+        await ctx.reply(
+            `⚙️ *ГЛОБАЛЬНЫЕ НАСТРОЙКИ*\n\n` +
+            `📌 Настройки применяются ко всем аккаунтам\n\n` +
+            `⏱️ Время прогрева: *${config.PROGRESS_DURATION_HOURS} часов*\n` +
+            `📨 Скорость: *${speedText}*\n` +
+            `🔄 Циклы: *${config.CYCLE_ACTIVE_TIME / 60000} мин активен / ${config.CYCLE_REST_TIME / 60000} мин отдых*\n\n` +
+            `👇 *Выберите что настроить:*`,
+            {
+                parse_mode: 'Markdown',
+                ...this.getSettingsKeyboard()
+            }
+        );
+    }
+
+    async showTimeSettings(ctx) {
+        await ctx.reply(
+            `⏱️ *Время прогрева*\n\n` +
+            `Выберите общее время прогрева:\n\n` +
+            `🟢 *6 часов* - для быстрого прогрева\n` +
+            `🟡 *12 часов* - средний прогрев\n` +
+            `🔴 *24 часа* - полный прогрев\n\n` +
+            `📌 Настройка применяется ко всем аккаунтам`,
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [
+                        Markup.button.callback('🟢 6 часов', 'set_time_6'),
+                        Markup.button.callback('🟡 12 часов', 'set_time_12'),
+                        Markup.button.callback('🔴 24 часа', 'set_time_24')
+                    ],
+                    [Markup.button.callback('🔙 Назад', 'main_settings')]
+                ])
+            }
+        );
+    }
+
+    async showSpeedSettings(ctx) {
+        const currentSpeed = config.SEND_SPEED || 'medium';
+        const speedEmojis = {
+            'slow': '🐢',
+            'medium': '🚶',
+            'fast': '🏃',
+            'human': '👤'
+        };
+        
+        await ctx.reply(
+            `📨 *Скорость отправки сообщений*\n\n` +
+            `Выберите как часто отправлять сообщения:\n\n` +
+            `${currentSpeed === 'slow' ? '✅' : '⬜'} 🐢 *Медленно* - каждые 2-5 минут\n` +
+            `${currentSpeed === 'medium' ? '✅' : '⬜'} 🚶 *Средне* - каждые 1-3 минуты\n` +
+            `${currentSpeed === 'fast' ? '✅' : '⬜'} 🏃 *Быстро* - каждые 30-60 секунд\n` +
+            `${currentSpeed === 'human' ? '✅' : '⬜'} 👤 *Как человек* - 1-5 минут (случайно)\n\n` +
+            `📌 Текущая: ${speedEmojis[currentSpeed] || '🚶'} *${currentSpeed}*`,
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [
+                        Markup.button.callback('🐢 Медленно', 'set_speed_slow'),
+                        Markup.button.callback('🚶 Средне', 'set_speed_medium'),
+                        Markup.button.callback('🏃 Быстро', 'set_speed_fast')
+                    ],
+                    [
+                        Markup.button.callback('👤 Как человек', 'set_speed_human')
+                    ],
+                    [Markup.button.callback('🔙 Назад', 'main_settings')]
+                ])
+            }
+        );
+    }
+
+    async showCyclesSettings(ctx) {
+        const active = config.CYCLE_ACTIVE_TIME / 60000;
+        const rest = config.CYCLE_REST_TIME / 60000;
+        
+        await ctx.reply(
+            `🔄 *Циклы активности/отдыха*\n\n` +
+            `Активная фаза: *${active} минут*\n` +
+            `Фаза отдыха: *${rest} минут*\n\n` +
+            `Выберите режим циклов:\n\n` +
+            `🟢 *10/10* - 10 мин активен, 10 мин отдых\n` +
+            `🟡 *15/10* - 15 мин активен, 10 мин отдых\n` +
+            `🔴 *20/10* - 20 мин активен, 10 мин отдых\n` +
+            `🟣 *30/15* - 30 мин активен, 15 мин отдых\n\n` +
+            `📌 Текущий: *${active}/${rest}* минут`,
+            {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                    [
+                        Markup.button.callback('🟢 10/10', 'set_cycle_10'),
+                        Markup.button.callback('🟡 15/10', 'set_cycle_15'),
+                        Markup.button.callback('🔴 20/10', 'set_cycle_20')
+                    ],
+                    [
+                        Markup.button.callback('🟣 30/15', 'set_cycle_30')
+                    ],
+                    [Markup.button.callback('🔙 Назад', 'main_settings')]
+                ])
+            }
+        );
+    }
+
     async showAccounts(ctx) {
         try {
             const userId = ctx.from.id;
@@ -747,9 +825,6 @@ async autoCheckAccounts() {
         }
     }
 
-    // ============================================
-    // INLINE КНОПКИ (ACTIONS)
-    // ============================================
     setupActions() {
         // Главное меню
         this.bot.action('main_stats', async (ctx) => {
@@ -791,10 +866,7 @@ async autoCheckAccounts() {
 
         this.bot.action('main_settings', async (ctx) => {
             await ctx.answerCbQuery();
-            await ctx.reply(
-                '⚙️ *Настройки*\n\nВыберите время прогрева:',
-                { parse_mode: 'Markdown', ...this.getSettingsKeyboard() }
-            );
+            await this.showSettings(ctx);
         });
 
         this.bot.action('main_help', async (ctx) => {
@@ -809,7 +881,106 @@ async autoCheckAccounts() {
             await ctx.reply('❌ Отменено', this.getMainKeyboard());
         });
 
-        // === АВТОРИЗАЦИЯ: QR ===
+        // === НАСТРОЙКИ: ВРЕМЯ ===
+        this.bot.action('settings_time', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showTimeSettings(ctx);
+        });
+
+        this.bot.action('set_time_6', async (ctx) => {
+            await ctx.answerCbQuery('✅ 6 часов');
+            config.PROGRESS_DURATION_HOURS = 6;
+            await ctx.reply(`✅ *Установлено время прогрева: 6 часов*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_time_12', async (ctx) => {
+            await ctx.answerCbQuery('✅ 12 часов');
+            config.PROGRESS_DURATION_HOURS = 12;
+            await ctx.reply(`✅ *Установлено время прогрева: 12 часов*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_time_24', async (ctx) => {
+            await ctx.answerCbQuery('✅ 24 часа');
+            config.PROGRESS_DURATION_HOURS = 24;
+            await ctx.reply(`✅ *Установлено время прогрева: 24 часа*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        // === НАСТРОЙКИ: СКОРОСТЬ ===
+        this.bot.action('settings_speed', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showSpeedSettings(ctx);
+        });
+
+        this.bot.action('set_speed_slow', async (ctx) => {
+            await ctx.answerCbQuery('🐢 Медленно');
+            config.SEND_SPEED = 'slow';
+            await ctx.reply(`✅ *Установлена медленная скорость*\n\n🕐 Задержка: 2-5 минут между сообщениями`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_speed_medium', async (ctx) => {
+            await ctx.answerCbQuery('🚶 Средне');
+            config.SEND_SPEED = 'medium';
+            await ctx.reply(`✅ *Установлена средняя скорость*\n\n🕐 Задержка: 1-3 минуты между сообщениями`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_speed_fast', async (ctx) => {
+            await ctx.answerCbQuery('🏃 Быстро');
+            config.SEND_SPEED = 'fast';
+            await ctx.reply(`✅ *Установлена быстрая скорость*\n\n🕐 Задержка: 30-60 секунд между сообщениями`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_speed_human', async (ctx) => {
+            await ctx.answerCbQuery('👤 Как человек');
+            config.SEND_SPEED = 'human';
+            await ctx.reply(`✅ *Установлен режим "Как человек"*\n\n🕐 Задержка: 1-5 минут (случайный интервал)`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        // === НАСТРОЙКИ: ЦИКЛЫ ===
+        this.bot.action('settings_cycles', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showCyclesSettings(ctx);
+        });
+
+        this.bot.action('set_cycle_10', async (ctx) => {
+            await ctx.answerCbQuery('🟢 10/10');
+            config.CYCLE_ACTIVE_TIME = 10 * 60 * 1000;
+            config.CYCLE_REST_TIME = 10 * 60 * 1000;
+            await ctx.reply(`✅ *Установлен режим: 10 мин активен / 10 мин отдых*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_cycle_15', async (ctx) => {
+            await ctx.answerCbQuery('🟡 15/10');
+            config.CYCLE_ACTIVE_TIME = 15 * 60 * 1000;
+            config.CYCLE_REST_TIME = 10 * 60 * 1000;
+            await ctx.reply(`✅ *Установлен режим: 15 мин активен / 10 мин отдых*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_cycle_20', async (ctx) => {
+            await ctx.answerCbQuery('🔴 20/10');
+            config.CYCLE_ACTIVE_TIME = 20 * 60 * 1000;
+            config.CYCLE_REST_TIME = 10 * 60 * 1000;
+            await ctx.reply(`✅ *Установлен режим: 20 мин активен / 10 мин отдых*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        this.bot.action('set_cycle_30', async (ctx) => {
+            await ctx.answerCbQuery('🟣 30/15');
+            config.CYCLE_ACTIVE_TIME = 30 * 60 * 1000;
+            config.CYCLE_REST_TIME = 15 * 60 * 1000;
+            await ctx.reply(`✅ *Установлен режим: 30 мин активен / 15 мин отдых*`, { parse_mode: 'Markdown' });
+            await this.showSettings(ctx);
+        });
+
+        // === АВТОРИЗАЦИЯ ===
         this.bot.action('auth_qr', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
@@ -822,7 +993,6 @@ async autoCheckAccounts() {
             await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'qr');
         });
 
-        // === АВТОРИЗАЦИЯ: КОД 8 ЦИФР ===
         this.bot.action('auth_code', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
@@ -838,120 +1008,94 @@ async autoCheckAccounts() {
             await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'code');
         });
 
-        // === АВТОРИЗАЦИЯ: ВСЁ ГОТОВО ===
         this.bot.action('auth_ready', async (ctx) => {
-    try {
-        const userId = ctx.from.id;
-        const state = this.userStates.get(userId);
-        
-        if (!state || !state.phone) {
-            await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
-            return;
-        }
-        
-        const client = this.clients.get(state.phone);
-        if (!client) {
-            await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
-            this.userStates.delete(userId);
-            return;
-        }
-        
-        let statusMsg = await ctx.reply(
-            `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Пожалуйста, подождите...`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        let isAuth = false;
-        let attempts = 0;
-        const maxAttempts = 10;
-        
-        while (attempts < maxAttempts) {
             try {
-                isAuth = await client.getAuthStatus();
-                if (isAuth) break;
-            } catch (error) {
-                console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
-            }
-            
-            attempts++;
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            if (attempts % 3 === 0) {
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    statusMsg.message_id,
-                    null,
-                    `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Попытка ${attempts}/${maxAttempts}\n\n💡 Убедитесь, что вы ввели код в WhatsApp`,
+                const userId = ctx.from.id;
+                const state = this.userStates.get(userId);
+                
+                if (!state || !state.phone) {
+                    await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+                    return;
+                }
+                
+                const client = this.clients.get(state.phone);
+                if (!client) {
+                    await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
+                    this.userStates.delete(userId);
+                    return;
+                }
+                
+                let statusMsg = await ctx.reply(
+                    `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Пожалуйста, подождите...`,
                     { parse_mode: 'Markdown' }
                 );
-            }
-        }
-        
-        if (isAuth) {
-            await this.db.updateAccountStatus(state.phone, true);
-            
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                statusMsg.message_id,
-                null,
-                `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
-                `⚙️ *Настройка прогрева:*\n` +
-                `1️⃣ Выберите время прогрева:\n` +
-                `   🟢 6 часов\n` +
-                `   🟢 12 часов\n` +
-                `   🟢 24 часа\n\n` +
-                `2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n` +
-                `📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([
-                        [
-                            Markup.button.callback('🕐 6 часов', 'set_progress_6'),
-                            Markup.button.callback('🕐 12 часов', 'set_progress_12'),
-                            Markup.button.callback('🕐 24 часа', 'set_progress_24')
-                        ],
-                        [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
-                        [Markup.button.callback('📊 Статистика', 'main_stats')]
-                    ])
+                
+                let isAuth = false;
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                while (attempts < maxAttempts) {
+                    try {
+                        isAuth = await client.getAuthStatus();
+                        if (isAuth) break;
+                    } catch (error) {
+                        console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
+                    }
+                    
+                    attempts++;
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    
+                    if (attempts % 3 === 0) {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat.id,
+                            statusMsg.message_id,
+                            null,
+                            `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Попытка ${attempts}/${maxAttempts}\n\n💡 Убедитесь, что вы ввели код в WhatsApp`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
                 }
-            );
-            
-            this.userStates.delete(userId);
-        } else {
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                statusMsg.message_id,
-                null,
-                `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n⏱️ Время ожидания истекло.\n\n🔄 Попробуйте снова через /add_account`,
-                { parse_mode: 'Markdown' }
-            );
-            this.userStates.delete(userId);
-        }
-    } catch (error) {
-        console.error('❌ Ошибка auth_ready:', error);
-        await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
-    }
-});
-        // Время прогрева
-        this.bot.action('set_progress_6', async (ctx) => {
-            await ctx.answerCbQuery('✅ Установлено 6 часов');
-            config.PROGRESS_DURATION_HOURS = 6;
-            await ctx.reply(`✅ *Установлено время прогрева: 6 часов*`);
+                
+                if (isAuth) {
+                    await this.db.updateAccountStatus(state.phone, true);
+                    
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMsg.message_id,
+                        null,
+                        `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
+                        `⚙️ *Глобальные настройки:*\n` +
+                        `⏱️ Время прогрева: ${config.PROGRESS_DURATION_HOURS} часов\n` +
+                        `📨 Скорость: ${config.SEND_SPEED || 'medium'}\n` +
+                        `🔄 Циклы: ${config.CYCLE_ACTIVE_TIME/60000}/${config.CYCLE_REST_TIME/60000} мин\n\n` +
+                        `📌 Для смены настроек используйте "⚙️ Настройки"\n\n` +
+                        `▶️ Когда будет 2+ аккаунта, нажмите "Запустить прогрев"`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
+                                [Markup.button.callback('⚙️ Настройки', 'main_settings')]
+                            ])
+                        }
+                    );
+                    
+                    this.userStates.delete(userId);
+                } else {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMsg.message_id,
+                        null,
+                        `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n⏱️ Время ожидания истекло.\n\n🔄 Попробуйте снова через /add_account`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    this.userStates.delete(userId);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка auth_ready:', error);
+                await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
+            }
         });
 
-        this.bot.action('set_progress_12', async (ctx) => {
-            await ctx.answerCbQuery('✅ Установлено 12 часов');
-            config.PROGRESS_DURATION_HOURS = 12;
-            await ctx.reply(`✅ *Установлено время прогрева: 12 часов*`);
-        });
-
-        this.bot.action('set_progress_24', async (ctx) => {
-            await ctx.answerCbQuery('✅ Установлено 24 часа');
-            config.PROGRESS_DURATION_HOURS = 24;
-            await ctx.reply(`✅ *Установлено время прогрева: 24 часа*`);
-        });
-
-        // Авторизация: показать QR
         this.bot.action('auth_show_qr', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
@@ -963,7 +1107,6 @@ async autoCheckAccounts() {
             await this.sendQRCode(ctx, state.phone);
         });
 
-        // Авторизация: отмена
         this.bot.action('auth_cancel', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
@@ -1010,7 +1153,6 @@ async autoCheckAccounts() {
             );
         });
 
-        // Авторизация из аккаунтов (QR)
         this.bot.action(/^auth_phone_(.+)_qr$/, async (ctx) => {
             const phone = ctx.match[1];
             const userId = ctx.from.id;
@@ -1029,7 +1171,6 @@ async autoCheckAccounts() {
             await this.startAuth(ctx, phone, account.name || 'WhatsApp', 'qr');
         });
 
-        // Авторизация из аккаунтов (код)
         this.bot.action(/^auth_phone_(.+)_code$/, async (ctx) => {
             const phone = ctx.match[1];
             const userId = ctx.from.id;
@@ -1048,7 +1189,6 @@ async autoCheckAccounts() {
             await this.startAuth(ctx, phone, account.name || 'WhatsApp', 'code');
         });
 
-        // Удаление аккаунта
         this.bot.action(/delete_(.+)/, async (ctx) => {
             const phone = ctx.match[1];
             const userId = ctx.from.id;
@@ -1073,151 +1213,134 @@ async autoCheckAccounts() {
             }
         });
 
-        // Настройки
-        this.bot.action(/set_(\d+)/, async (ctx) => {
-            const hours = parseInt(ctx.match[1]);
-            await ctx.answerCbQuery(`✅ ${hours} часов`);
-            config.PROGRESS_DURATION_HOURS = hours;
-            await ctx.reply(`✅ Установлено время прогрева: ${hours} часов`);
-        });
-
-        // Назад
         this.bot.action('back_main', async (ctx) => {
             await ctx.answerCbQuery();
             await ctx.reply('Главное меню:', this.getMainKeyboard());
         });
     }
 
-    // ============================================
-    // АВТОРИЗАЦИЯ WHATSAPP
-    // ============================================
-    // src/bot.js - полный исправленный метод startAuth
+    async startAuth(ctx, phone, name, method = 'qr') {
+        try {
+            console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
+            if (this.clients.has(phone)) {
+                await this.clients.get(phone).stop();
+                this.clients.delete(phone);
+            }
+            const client = new WhatsAppClient(phone, method);
+            this.clients.set(phone, client);
+            this.userStates.set(ctx.from.id, { phone, name: name || 'WhatsApp', step: 'waiting_auth' });
 
-async startAuth(ctx, phone, name, method = 'qr') {
-    try {
-        console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
-        if (this.clients.has(phone)) {
-            await this.clients.get(phone).stop();
-            this.clients.delete(phone);
-        }
-        const client = new WhatsAppClient(phone, method);
-        this.clients.set(phone, client);
-        this.userStates.set(ctx.from.id, { phone, name: name || 'WhatsApp', step: 'waiting_auth' });
-
-        // === QR ===
-        if (method === 'qr') {
-            let qrSent = false;
-            client.on('qr', async (qrImage) => {
-                if (qrSent) return;
-                qrSent = true;
-                try {
-                    await ctx.replyWithPhoto(
-                        { source: qrImage },
-                        {
-                            caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web\n\nПосле сканирования нажмите "✅ Всё готово"`,
-                            parse_mode: 'Markdown',
-                            ...this.getAuthKeyboard()
-                        }
-                    );
-                } catch (error) {}
-            });
-            setTimeout(async () => {
-                if (!this.userStates.has(ctx.from.id)) return;
-                if (qrSent) return;
-                const qr = await client.getQRCode();
-                if (qr) {
+            if (method === 'qr') {
+                let qrSent = false;
+                client.on('qr', async (qrImage) => {
+                    if (qrSent) return;
                     qrSent = true;
-                    await ctx.replyWithPhoto(
-                        { source: qr },
-                        { 
-                            caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web`,
+                    try {
+                        await ctx.replyWithPhoto(
+                            { source: qrImage },
+                            {
+                                caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web\n\nПосле сканирования нажмите "✅ Всё готово"`,
+                                parse_mode: 'Markdown',
+                                ...this.getAuthKeyboard()
+                            }
+                        );
+                    } catch (error) {}
+                });
+                setTimeout(async () => {
+                    if (!this.userStates.has(ctx.from.id)) return;
+                    if (qrSent) return;
+                    const qr = await client.getQRCode();
+                    if (qr) {
+                        qrSent = true;
+                        await ctx.replyWithPhoto(
+                            { source: qr },
+                            { 
+                                caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web`,
+                                parse_mode: 'Markdown',
+                                ...this.getAuthKeyboard()
+                            }
+                        );
+                    }
+                }, 3000);
+                await client.start();
+            }
+
+            if (method === 'code') {
+                await client.start();
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                try {
+                    const code = await client.requestPairingCode(phone);
+                    await ctx.reply(
+                        `🔢 *Ваш 8-значный код для ${phone}:*\n\n` +
+                        `\`${code}\`\n\n` +
+                        `📱 *Инструкция:*\n` +
+                        `1️⃣ Откройте WhatsApp на телефоне\n` +
+                        `2️⃣ Нажмите на три точки (⋮)\n` +
+                        `3️⃣ Выберите "WhatsApp Web"\n` +
+                        `4️⃣ Введите этот код\n\n` +
+                        `✅ После ввода кода нажмите "✅ Всё готово"`,
+                        {
                             parse_mode: 'Markdown',
-                            ...this.getAuthKeyboard()
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('✅ Всё готово', 'auth_ready')],
+                                [Markup.button.callback('🔄 Новый код', 'auth_code')],
+                                [Markup.button.callback('❌ Отмена', 'auth_cancel')]
+                            ])
                         }
                     );
+                } catch (error) {
+                    console.error('❌ Ошибка получения кода:', error);
+                    await ctx.reply(`❌ Ошибка: ${error.message}`);
+                    this.clients.delete(phone);
+                    this.userStates.delete(ctx.from.id);
+                    return;
                 }
-            }, 3000);
-            await client.start();
-        }
+            }
 
-        // === КОД ===
-        if (method === 'code') {
-            await client.start();
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            try {
-                const code = await client.requestPairingCode(phone);
-                await ctx.reply(
-                    `🔢 *Ваш 8-значный код для ${phone}:*\n\n` +
-                    `\`${code}\`\n\n` +
-                    `📱 *Инструкция:*\n` +
-                    `1️⃣ Откройте WhatsApp на телефоне\n` +
-                    `2️⃣ Нажмите на три точки (⋮)\n` +
-                    `3️⃣ Выберите "WhatsApp Web"\n` +
-                    `4️⃣ Введите этот код\n\n` +
-                    `✅ После ввода кода нажмите "✅ Всё готово"`,
-                    {
-                        parse_mode: 'Markdown',
-                        ...Markup.inlineKeyboard([
-                            [Markup.button.callback('✅ Всё готово', 'auth_ready')],
-                            [Markup.button.callback('🔄 Новый код', 'auth_code')],
-                            [Markup.button.callback('❌ Отмена', 'auth_cancel')]
-                        ])
-                    }
-                );
-            } catch (error) {
-                console.error('❌ Ошибка получения кода:', error);
-                await ctx.reply(`❌ Ошибка: ${error.message}`);
+            client.on('authenticated', async () => {
+                console.log(`✅ ${phone} авторизован!`);
+                await this.db.updateAccountStatus(phone, true);
+                await ctx.reply(`✅ Аккаунт ${phone} успешно авторизован! 🎉`);
+                this.userStates.delete(ctx.from.id);
+            });
+
+            client.on('disconnected', async (data) => {
+                const reason = data?.reason || 'Неизвестно';
+                const isBan = data?.isBan || false;
+                console.log(`🔴 ${phone} отключен: ${reason}`);
+                let message = `⚠️ *Сессия истекла для ${phone}!*\n\n`;
+                if (isBan) {
+                    message += `🚫 Аккаунт забанен!\n📌 Причина: ${reason}`;
+                } else {
+                    message += `🔄 Бот автоматически переподключается...`;
+                }
+                await ctx.reply(message, { parse_mode: 'Markdown' });
                 this.clients.delete(phone);
                 this.userStates.delete(ctx.from.id);
-                return;
+            });
+
+            client.on('auth_failure', async (error) => {
+                console.error(`❌ Ошибка ${phone}:`, error);
+                await ctx.reply(`❌ Ошибка авторизации: ${error.message}`, { parse_mode: 'Markdown' });
+                this.clients.delete(phone);
+                this.userStates.delete(ctx.from.id);
+            });
+
+            client.on('ready', async () => {
+                console.log(`🟢 ${phone} готов`);
+                await ctx.reply(`✅ Аккаунт ${phone} готов к работе!`, { parse_mode: 'Markdown' });
+            });
+
+        } catch (error) {
+            console.error('❌ Ошибка авторизации:', error);
+            await ctx.reply(`❌ Ошибка: ${error.message}`);
+            if (this.clients.has(phone)) {
+                await this.clients.get(phone).stop();
+                this.clients.delete(phone);
             }
+            this.userStates.delete(ctx.from.id);
         }
-
-        // === ОБЩИЕ ОБРАБОТЧИКИ ===
-        client.on('authenticated', async () => {
-            console.log(`✅ ${phone} авторизован!`);
-            await this.db.updateAccountStatus(phone, true);
-            await ctx.reply(`✅ Аккаунт ${phone} успешно авторизован! 🎉`);
-            this.userStates.delete(ctx.from.id);
-        });
-
-        client.on('disconnected', async (data) => {
-            const reason = data?.reason || 'Неизвестно';
-            const isBan = data?.isBan || false;
-            console.log(`🔴 ${phone} отключен: ${reason}`);
-            let message = `⚠️ *Сессия истекла для ${phone}!*\n\n`;
-            if (isBan) {
-                message += `🚫 Аккаунт забанен!\n📌 Причина: ${reason}`;
-            } else {
-                message += `🔄 Бот автоматически переподключается...`;
-            }
-            await ctx.reply(message, { parse_mode: 'Markdown' });
-            this.clients.delete(phone);
-            this.userStates.delete(ctx.from.id);
-        });
-
-        client.on('auth_failure', async (error) => {
-            console.error(`❌ Ошибка ${phone}:`, error);
-            await ctx.reply(`❌ Ошибка авторизации: ${error.message}`, { parse_mode: 'Markdown' });
-            this.clients.delete(phone);
-            this.userStates.delete(ctx.from.id);
-        });
-
-        client.on('ready', async () => {
-            console.log(`🟢 ${phone} готов`);
-            await ctx.reply(`✅ Аккаунт ${phone} готов к работе!`, { parse_mode: 'Markdown' });
-        });
-
-    } catch (error) {
-        console.error('❌ Ошибка авторизации:', error);
-        await ctx.reply(`❌ Ошибка: ${error.message}`);
-        if (this.clients.has(phone)) {
-            await this.clients.get(phone).stop();
-            this.clients.delete(phone);
-        }
-        this.userStates.delete(ctx.from.id);
     }
-}
 
     async sendQRCode(ctx, phone) {
         const client = this.clients.get(phone);
@@ -1228,9 +1351,6 @@ async startAuth(ctx, phone, name, method = 'qr') {
         }
     }
 
-    // ============================================
-    // ЗАПУСК И ОСТАНОВКА
-    // ============================================
     async start() {
         try {
             console.log('🚀 Запуск бота...');
