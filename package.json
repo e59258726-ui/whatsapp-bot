@@ -4,7 +4,7 @@
   "description": "WhatsApp Progress Bot with Telegram interface",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node --max-old-space-size=256 index.js",
     "dev": "nodemon index.js"
   },
   "dependencies": {
