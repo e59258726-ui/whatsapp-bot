@@ -1,25 +1,27 @@
 FROM node:20-alpine
 
-# Устанавливаем git и другие зависимости
+# Устанавливаем Chromium
 RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
     git \
-    python3 \
-    make \
-    g++ \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
 COPY package*.json ./
-
-# Устанавливаем зависимости
-RUN npm install --production --no-audit --no-fund || \
-    npm install --production --no-audit
+RUN npm install
 
 COPY . .
 
 RUN mkdir -p sessions logs auth_info_baileys
 
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV NODE_ENV=production
 
 EXPOSE 10000
