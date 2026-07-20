@@ -5,7 +5,7 @@ module.exports = {
     BOT_TOKEN: process.env.BOT_TOKEN,
     DATABASE_URL: process.env.DATABASE_URL,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-    GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-pro',  // <--- ДОБАВИТЬ
+    GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-1.5-pro',
     PROGRESS_DURATION_HOURS: parseInt(process.env.PROGRESS_DURATION_HOURS) || 24,
     MIN_DELAY: parseInt(process.env.MIN_DELAY) || 30,
     MAX_DELAY: parseInt(process.env.MAX_DELAY) || 120,
