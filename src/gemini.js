@@ -3,14 +3,14 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('./config');
 
 class GeminiAI {
-    constructor() {
-        this.genAI = config.GEMINI_API_KEY ? new GoogleGenerativeAI(config.GEMINI_API_KEY) : null;
-        this.model = this.genAI ? this.genAI.getGenerativeModel({ 
-            model: config.GEMINI_MODEL || 'gemini-pro'
-        }) : null;
-        console.log(`✅ Gemini AI ${this.genAI ? 'инициализирован' : 'недоступен'}`);
-        console.log(`📦 Модель: ${config.GEMINI_MODEL || 'gemini-pro'}`);
-    }
+constructor() {
+    this.genAI = config.GEMINI_API_KEY ? new GoogleGenerativeAI(config.GEMINI_API_KEY) : null;
+    this.model = this.genAI ? this.genAI.getGenerativeModel({ 
+        model: config.GEMINI_MODEL || 'gemini-1.5-pro'  // <--- ИЗМЕНЕНО
+    }) : null;
+    console.log(`✅ Gemini AI ${this.genAI ? 'инициализирован' : 'недоступен'}`);
+    console.log(`📦 Модель: ${config.GEMINI_MODEL || 'gemini-1.5-pro'}`);
+}
 
     async generateMessage(prompt) {
         if (!this.model) {
