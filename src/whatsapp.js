@@ -18,7 +18,7 @@ class WhatsAppClient {
 
         const sessionPath = path.join(sessionsDir, `session-${this.clientId}`);
         if (fs.existsSync(sessionPath)) {
-            console.log(`🔄 Удаляем старую сессию para ${this.phone}`);
+            console.log(`🔄 Удаляем старую сессию для ${this.phone}`);
             try {
                 fs.rmSync(sessionPath, { recursive: true, force: true });
             } catch (error) {
@@ -106,7 +106,7 @@ class WhatsAppClient {
         this.memoryCleanupInterval = setInterval(() => {
             if (global.gc) {
                 global.gc();
-                console.log(`🧹 GC вызван para ${this.phone}`);
+                console.log(`🧹 GC вызван для ${this.phone}`);
             }
         }, 60000);
     }
@@ -173,7 +173,7 @@ class WhatsAppClient {
                 throw new Error('Клиент не инициализирован');
             }
             const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-            console.log(`🔢 Запрос кода para ${cleanNumber}`);
+            console.log(`🔢 Запрос кода для ${cleanNumber}`);
             const code = await this.client.requestPairingCode(cleanNumber);
             console.log(`✅ Код получен: ${code}`);
             return code;
@@ -189,9 +189,9 @@ class WhatsAppClient {
                 throw new Error('Клиент не инициализирован');
             }
             const cleanCode = code.replace(/[-\s]/g, '').toUpperCase();
-            console.log(`🔢 Отправка кода ${cleanCode} para ${this.phone}`);
+            console.log(`🔢 Отправка кода ${cleanCode} для ${this.phone}`);
             await this.client.sendCode(cleanCode);
-            console.log(`✅ Код ${cleanCode} отправлен para ${this.phone}`);
+            console.log(`✅ Код ${cleanCode} отправлен для ${this.phone}`);
             return true;
         } catch (error) {
             console.error(`❌ Ошибка отправки кода ${this.phone}:`, error);
@@ -219,10 +219,10 @@ class WhatsAppClient {
                 this.browser = this.client.pupBrowser;
             }
             if (this.browser) {
-                console.log(`🔄 Закрытие браузера para ${this.phone}...`);
+                console.log(`🔄 Закрытие браузера для ${this.phone}...`);
                 await this.browser.close();
                 this.browser = null;
-                console.log(`✅ Браузер закрыт para ${this.phone}`);
+                console.log(`✅ Браузер закрыт для ${this.phone}`);
                 if (global.gc) global.gc();
             }
         } catch (error) {
@@ -232,15 +232,15 @@ class WhatsAppClient {
 
     async start() {
         try {
-            console.log(`🚀 Запуск клиента para ${this.phone}`);
+            console.log(`🚀 Запуск клиента для ${this.phone}`);
 
             if (this.client && this.client.pupBrowser) {
                 try {
                     const isConnected = await this.client.pupBrowser.isConnected();
                     if (isConnected) {
-                        console.log(`⚠️ Браузер уже запущен para ${this.phone}, закрываем...`);
+                        console.log(`⚠️ Браузер уже запущен для ${this.phone}, закрываем...`);
                         await this.client.pupBrowser.close();
-                        console.log(`✅ Старый браузер закрыт para ${this.phone}`);
+                        console.log(`✅ Старый браузер закрыт для ${this.phone}`);
                     }
                 } catch (error) {
                     console.log(`⚠️ Ошибка проверки браузера: ${error.message}`);
@@ -248,7 +248,7 @@ class WhatsAppClient {
             }
 
             this.client.on('qr', async (qrData) => {
-                console.log(`📱 QR код para ${this.phone}`);
+                console.log(`📱 QR код для ${this.phone}`);
                 this.qrCode = qrData;
                 if (this.method === 'qr') {
                     try {
@@ -280,10 +280,10 @@ class WhatsAppClient {
             });
 
             this.client.on('message', async (message) => {
-                console.log(`💬 Сообщение para ${this.phone}:`, message.body);
+                console.log(`💬 Сообщение для ${this.phone}:`, message.body);
                 this.messageCount++;
                 if (this.messageCount >= this.MAX_MESSAGES) {
-                    console.log(`🔄 Перезапуск клиента ${this.phone} para освобождения памяти...`);
+                    console.log(`🔄 Перезапуск клиента ${this.phone} для освобождения памяти...`);
                     await this.closeBrowser();
                     this.messageCount = 0;
                     setTimeout(() => this.start(), 5000);
