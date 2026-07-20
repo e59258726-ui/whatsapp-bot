@@ -170,7 +170,6 @@ class TelegramBot {
             await this.showProgressStatus(ctx);
         });
 
-        // ===== НОВАЯ КОМАНДА ДЛЯ ПЕРЕЗАПУСКА КЛИЕНТОВ =====
         this.bot.command('restart_clients', async (ctx) => {
             console.log(`🔄 /restart_clients от ${ctx.from.id}`);
             await this.restartClients(ctx);
@@ -239,9 +238,6 @@ class TelegramBot {
         );
     }
 
-    // ============================================
-    // ПЕРЕЗАПУСК КЛИЕНТОВ
-    // ============================================
     async restartClients(ctx) {
         const userId = ctx.from.id;
         await ctx.reply('🔄 Перезапускаю клиентов WhatsApp...');
@@ -259,13 +255,11 @@ class TelegramBot {
         
         for (const account of authorized) {
             try {
-                // Закрываем старый клиент
                 if (this.clients.has(account.phone)) {
                     await this.clients.get(account.phone).stop();
                     this.clients.delete(account.phone);
                 }
                 
-                // Создаем новый клиент
                 const client = new WhatsAppClient(account.phone, 'qr');
                 this.clients.set(account.phone, client);
                 
@@ -326,7 +320,6 @@ class TelegramBot {
                 const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
                 
                 try {
-                    // Проверяем, не занят ли номер другим пользователем
                     const existing = await this.db.getAccount(normalizedPhone);
                     if (existing && existing.user_id !== userId) {
                         await ctx.reply(
@@ -510,7 +503,6 @@ class TelegramBot {
                     return;
                 }
                 
-                // Отправляем сообщение о ожидании
                 let statusMsg = await ctx.reply(
                     `⏳ *Ожидание подключения...*\n\n` +
                     `📱 Проверяю статус аккаунта...\n` +
@@ -667,6 +659,104 @@ class TelegramBot {
             await ctx.reply('❌ Отменено', this.getMainKeyboard());
         });
 
+        // === УПРАВЛЕНИЕ АККАУНТОМ (ПРИ НАЖАТИИ НА НОМЕР В /ACCOUNTS) ===
+        this.bot.action(/^account_(.+)/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            console.log(`📱 Управление аккаунтом ${phone} от ${userId}`);
+            
+            const account = await this.db.getAccount(phone, userId);
+            if (!account) {
+                await ctx.answerCbQuery('❌ Аккаунт не найден');
+                await ctx.reply('❌ Аккаунт не принадлежит вам');
+                return;
+            }
+            
+            await ctx.answerCbQuery();
+            
+            const status = account.is_authenticated ? '🟢 авторизован' : '🔴 не авторизован';
+            
+            await ctx.reply(
+                `📱 *Аккаунт ${phone}*\n\n` +
+                `📊 Статус: ${status}\n` +
+                `🆔 ID: ${account.id}\n` +
+                `📅 Создан: ${new Date(account.created_at).toLocaleString()}\n\n` +
+                `🔧 *Доступные действия:*`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [
+                            Markup.button.callback('📱 Авторизовать (QR)', `auth_phone_${phone}_qr`),
+                            Markup.button.callback('🔢 Авторизовать (код)', `auth_phone_${phone}_code`)
+                        ],
+                        [
+                            Markup.button.callback('🗑️ Удалить аккаунт', `delete_${phone}`)
+                        ],
+                        [
+                            Markup.button.callback('🔙 Назад', 'main_accounts')
+                        ]
+                    ])
+                }
+            );
+        });
+
+        // === АВТОРИЗАЦИЯ ИЗ СПИСКА АККАУНТОВ (QR) ===
+        this.bot.action(/^auth_phone_(.+)_qr$/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            console.log(`📱 Авторизация QR для ${phone} от ${userId}`);
+            
+            const account = await this.db.getAccount(phone, userId);
+            if (!account) {
+                await ctx.answerCbQuery('❌ Аккаунт не найден');
+                await ctx.reply('❌ Аккаунт не принадлежит вам');
+                return;
+            }
+            
+            await ctx.answerCbQuery('📱 Запускаю авторизацию...');
+            
+            this.userStates.set(userId, { 
+                phone: phone,
+                step: 'waiting_auth',
+                name: account.name || 'WhatsApp'
+            });
+            
+            await ctx.reply('📱 Запускаю авторизацию через QR-код...');
+            await this.startAuth(ctx, phone, account.name || 'WhatsApp', 'qr');
+        });
+
+        // === АВТОРИЗАЦИЯ ИЗ СПИСКА АККАУНТОВ (КОД) ===
+        this.bot.action(/^auth_phone_(.+)_code$/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            console.log(`📱 Авторизация кодом для ${phone} от ${userId}`);
+            
+            const account = await this.db.getAccount(phone, userId);
+            if (!account) {
+                await ctx.answerCbQuery('❌ Аккаунт не найден');
+                await ctx.reply('❌ Аккаунт не принадлежит вам');
+                return;
+            }
+            
+            await ctx.answerCbQuery('🔢 Запускаю авторизацию...');
+            
+            this.userStates.set(userId, { 
+                phone: phone,
+                step: 'waiting_auth',
+                name: account.name || 'WhatsApp'
+            });
+            
+            await ctx.reply(
+                '🔢 *Генерация 8-значного кода...*\n\n' +
+                '⏳ Пожалуйста, подождите несколько секунд...',
+                { parse_mode: 'Markdown' }
+            );
+            await this.startAuth(ctx, phone, account.name || 'WhatsApp', 'code');
+        });
+
         // === УДАЛЕНИЕ АККАУНТА ===
         this.bot.action(/delete_(.+)/, async (ctx) => {
             const phone = ctx.match[1];
@@ -725,7 +815,12 @@ class TelegramBot {
             const buttons = [];
             for (const acc of accounts) {
                 const status = acc.is_authenticated ? '🟢' : '🔴';
-                buttons.push([Markup.button.callback(`${status} ${acc.phone}`, `delete_${acc.phone}`)]);
+                buttons.push([
+                    Markup.button.callback(
+                        `${status} ${acc.phone}`, 
+                        `account_${acc.phone}`
+                    )
+                ]);
             }
             buttons.push([Markup.button.callback('🔙 Назад', 'back_main')]);
             
@@ -733,8 +828,9 @@ class TelegramBot {
                 '📋 *Ваши аккаунты*\n\n' +
                 '🟢 - авторизован\n' +
                 '🔴 - не авторизован\n\n' +
-                '👆 *Нажмите на номер чтобы удалить*\n\n' +
-                `📌 Всего аккаунтов: ${accounts.length}`,
+                '👆 *Нажмите на номер для управления:*\n' +
+                '   📱 Авторизовать аккаунт\n' +
+                '   🗑️ Удалить аккаунт',
                 {
                     parse_mode: 'Markdown',
                     ...Markup.inlineKeyboard(buttons)
@@ -1083,7 +1179,7 @@ class TelegramBot {
             await this.db.connect();
             console.log('✅ База данных подключена');
             
-            // ===== АВТОМАТИЧЕСКИЙ ЗАПУСК КЛИЕНТОВ =====
+            // Автоматический запуск клиентов
             console.log('🔄 Запуск клиентов для авторизованных аккаунтов...');
             const accounts = await this.db.getAccounts();
             const authorized = accounts.filter(a => a.is_authenticated);
