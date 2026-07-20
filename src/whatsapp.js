@@ -261,11 +261,11 @@ class WhatsAppClient {
             });
 
             this.client.on('authenticated', async (session) => {
-    console.log(`✅ ${this.phone} аутентифицирован`);
-    this.isAuthenticated = true;
-    // ❌ НЕ ЗАКРЫВАЙТЕ БРАУЗЕР!
-    // await this.closeBrowser(); // НЕ ДЕЛАЙТЕ ЭТО!
-});
+                console.log(`✅ ${this.phone} аутентифицирован`);
+                this.isAuthenticated = true;
+                this.messageCount = 0;
+                await this.emit('authenticated', session);
+            });
 
             this.client.on('ready', async () => {
                 console.log(`🟢 ${this.phone} готов`);
@@ -295,7 +295,45 @@ class WhatsAppClient {
                 console.log(`🔴 ${this.phone} отключен:`, reason);
                 this.isAuthenticated = false;
                 await this.emit('disconnected', reason);
-                await this.closeBrowser();
+                
+                const isBan = reason && (
+                    reason.includes('Banned') || 
+                    reason.includes('banned') ||
+                    reason.includes('blocked') ||
+                    reason.includes('Blocked')
+                );
+                
+                if (isBan) {
+                    console.log(`🚫 ${this.phone} забанен!`);
+                    await this.emit('auth_failure', new Error(`Аккаунт ${this.phone} забанен WhatsApp`));
+                    await this.closeBrowser();
+                    return;
+                }
+                
+                console.log(`🔄 Попытка переподключения ${this.phone} через 5 секунд...`);
+                await this.emit('disconnected', {
+                    reason: reason || 'Неизвестно',
+                    isBan: false,
+                    willReconnect: true
+                });
+                
+                setTimeout(async () => {
+                    try {
+                        if (this.client && this.client.pupBrowser) {
+                            const isConnected = await this.client.pupBrowser.isConnected();
+                            if (isConnected) {
+                                console.log(`✅ ${this.phone} уже подключен`);
+                                return;
+                            }
+                        }
+                        await this.start();
+                        console.log(`✅ ${this.phone} переподключен!`);
+                        await this.emit('ready');
+                    } catch (error) {
+                        console.error(`❌ Ошибка переподключения ${this.phone}:`, error);
+                        await this.emit('auth_failure', error);
+                    }
+                }, 5000);
             });
 
             this.client.on('change_state', async (state) => {
@@ -374,14 +412,28 @@ class WhatsAppClient {
 
     async getAuthStatus() {
         try {
-            if (this.client) {
+            if (!this.client || !this.client.pupBrowser) {
+                return false;
+            }
+            
+            try {
+                const isConnected = await this.client.pupBrowser.isConnected();
+                if (!isConnected) {
+                    this.isAuthenticated = false;
+                    return false;
+                }
+            } catch (error) {
+                return false;
+            }
+            
+            try {
                 const state = await this.client.getState();
                 this.isAuthenticated = state === 'CONNECTED';
                 return this.isAuthenticated;
+            } catch (error) {
+                return false;
             }
-            return false;
         } catch (error) {
-            console.error('❌ Ошибка статуса:', error);
             return false;
         }
     }
