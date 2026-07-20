@@ -1,4 +1,5 @@
-// src/whatsapp.js - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
+// src/whatsapp.js — полный файл с методом requestPairingCode
+
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -28,7 +29,6 @@ class WhatsAppClient {
 
         const executablePath = this.findBrowser();
 
-        // === ОПТИМИЗИРОВАННЫЕ НАСТРОЙКИ PUPPETEER ===
         this.client = new Client({
             authStrategy: new LocalAuth({
                 clientId: this.clientId,
@@ -164,6 +164,30 @@ class WhatsAppClient {
                     console.error(`❌ Ошибка в обработчике ${event}:`, error);
                 }
             }
+        }
+    }
+
+    // ============================================
+    // ЗАПРОС 8-ЗНАЧНОГО КОДА
+    // ============================================
+    async requestPairingCode(phoneNumber) {
+        try {
+            if (!this.client) {
+                throw new Error('Клиент не инициализирован');
+            }
+            
+            // Очищаем номер от "+" и пробелов
+            const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+            console.log(`🔢 Запрос кода для ${cleanNumber}`);
+            
+            // Запрашиваем 8-значный код
+            const code = await this.client.requestPairingCode(cleanNumber);
+            console.log(`✅ Код получен: ${code}`);
+            
+            return code;
+        } catch (error) {
+            console.error(`❌ Ошибка запроса кода:`, error);
+            throw error;
         }
     }
 
