@@ -35,7 +35,6 @@ class Database {
         try {
             const client = await this.pool.connect();
 
-            // Таблица аккаунтов с user_id
             await client.query(`
                 CREATE TABLE IF NOT EXISTS accounts (
                     id SERIAL PRIMARY KEY,
@@ -49,7 +48,6 @@ class Database {
                 )
             `);
 
-            // Индексы для быстрого поиска
             await client.query(`
                 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
                 CREATE INDEX IF NOT EXISTS idx_accounts_phone ON accounts(phone);
@@ -91,14 +89,10 @@ class Database {
         }
     }
 
-    // ============================================
-    // ДОБАВЛЕНИЕ АККАУНТА
-    // ============================================
     async addAccount(phone, userId, name = 'WhatsApp') {
         try {
             const client = await this.pool.connect();
             
-            // Проверяем, не принадлежит ли номер другому пользователю
             const existing = await client.query(
                 'SELECT user_id FROM accounts WHERE phone = $1',
                 [phone]
@@ -128,34 +122,26 @@ class Database {
         }
     }
 
-    // ============================================
-    // ПОЛУЧЕНИЕ АККАУНТОВ ПОЛЬЗОВАТЕЛЯ
-    // ============================================
-  async getAccounts(userId = null) {
-    try {
-        const client = await this.pool.connect();
-        let query = 'SELECT * FROM accounts ORDER BY created_at DESC';
-        let params = [];
-        
-        // Если userId НЕ передан - возвращаем ВСЕ аккаунты
-        // Если userId передан - только его аккаунты
-        if (userId) {
-            query = 'SELECT * FROM accounts WHERE user_id = $1 ORDER BY created_at DESC';
-            params = [userId];
+    async getAccounts(userId = null) {
+        try {
+            const client = await this.pool.connect();
+            let query = 'SELECT * FROM accounts ORDER BY created_at DESC';
+            let params = [];
+            
+            if (userId) {
+                query = 'SELECT * FROM accounts WHERE user_id = $1 ORDER BY created_at DESC';
+                params = [userId];
+            }
+            
+            const result = await client.query(query, params);
+            client.release();
+            return result.rows;
+        } catch (error) {
+            console.error('❌ Ошибка получения аккаунтов:', error);
+            throw error;
         }
-        
-        const result = await client.query(query, params);
-        client.release();
-        return result.rows;
-    } catch (error) {
-        console.error('❌ Ошибка получения аккаунтов:', error);
-        throw error;
     }
-}
 
-    // ============================================
-    // ПОЛУЧЕНИЕ АККАУНТА ПО НОМЕРУ
-    // ============================================
     async getAccount(phone, userId = null) {
         try {
             const client = await this.pool.connect();
@@ -176,9 +162,6 @@ class Database {
         }
     }
 
-    // ============================================
-    // ОБНОВЛЕНИЕ СТАТУСА АККАУНТА
-    // ============================================
     async updateAccountStatus(phone, isAuthenticated, userId = null) {
         try {
             const client = await this.pool.connect();
@@ -200,52 +183,43 @@ class Database {
         }
     }
 
-    // ============================================
-    // УДАЛЕНИЕ АККАУНТА
-    // src/database.js - исправленный метод deleteAccount
-
-async deleteAccount(phone, userId = null) {
-    try {
-        const client = await this.pool.connect();
-        
-        // Сначала находим ID аккаунта
-        let accountQuery = 'SELECT id FROM accounts WHERE phone = $1';
-        let accountParams = [phone];
-        
-        if (userId) {
-            accountQuery += ' AND user_id = $2';
-            accountParams.push(userId);
-        }
-        
-        const accountResult = await client.query(accountQuery, accountParams);
-        
-        if (accountResult.rows.length === 0) {
+    async deleteAccount(phone, userId = null) {
+        try {
+            const client = await this.pool.connect();
+            
+            let accountQuery = 'SELECT id FROM accounts WHERE phone = $1';
+            let accountParams = [phone];
+            
+            if (userId) {
+                accountQuery += ' AND user_id = $2';
+                accountParams.push(userId);
+            }
+            
+            const accountResult = await client.query(accountQuery, accountParams);
+            
+            if (accountResult.rows.length === 0) {
+                client.release();
+                console.log(`⚠️ Аккаунт ${phone} не найден`);
+                return;
+            }
+            
+            const accountId = accountResult.rows[0].id;
+            
+            await client.query(
+                'DELETE FROM messages WHERE from_account_id = $1 OR to_account_id = $1',
+                [accountId]
+            );
+            
+            await client.query('DELETE FROM accounts WHERE id = $1', [accountId]);
+            
             client.release();
-            console.log(`⚠️ Аккаунт ${phone} не найден`);
-            return;
+            console.log(`✅ Аккаунт ${phone} удален вместе с сообщениями`);
+        } catch (error) {
+            console.error('❌ Ошибка удаления аккаунта:', error);
+            throw error;
         }
-        
-        const accountId = accountResult.rows[0].id;
-        
-        // Удаляем сообщения
-        await client.query(
-            'DELETE FROM messages WHERE from_account_id = $1 OR to_account_id = $1',
-            [accountId]
-        );
-        
-        // Удаляем аккаунт
-        await client.query('DELETE FROM accounts WHERE id = $1', [accountId]);
-        
-        client.release();
-        console.log(`✅ Аккаунт ${phone} удален вместе с сообщениями`);
-    } catch (error) {
-        console.error('❌ Ошибка удаления аккаунта:', error);
-        throw error;
     }
-}
-    // ============================================
-    // СОХРАНЕНИЕ СООБЩЕНИЯ
-    // ============================================
+
     async saveMessage(fromAccountId, toAccountId, content, type = 'text') {
         try {
             const client = await this.pool.connect();
