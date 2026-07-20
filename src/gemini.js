@@ -4,13 +4,13 @@ const config = require('./config');
 
 class GeminiAI {
     constructor() {
-    this.genAI = config.GEMINI_API_KEY ? new GoogleGenerativeAI(config.GEMINI_API_KEY) : null;
-    this.model = this.genAI ? this.genAI.getGenerativeModel({ 
-        model: config.GEMINI_MODEL || 'gemini-flash-latest'
-    }) : null;
-    console.log(`✅ Gemini AI ${this.genAI ? 'инициализирован' : 'недоступен'}`);
-    console.log(`📦 Модель: ${config.GEMINI_MODEL || 'gemini-flash-latest'}`);
-}
+        this.genAI = config.GEMINI_API_KEY ? new GoogleGenerativeAI(config.GEMINI_API_KEY) : null;
+        this.model = this.genAI ? this.genAI.getGenerativeModel({ 
+            model: config.GEMINI_MODEL || 'gemini-flash-latest'
+        }) : null;
+        console.log(`✅ Gemini AI ${this.genAI ? 'инициализирован' : 'недоступен'}`);
+        console.log(`📦 Модель: ${config.GEMINI_MODEL || 'gemini-flash-latest'}`);
+    }
 
     async generateMessage(prompt) {
         if (!this.model) {
