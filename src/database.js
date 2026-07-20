@@ -200,44 +200,47 @@ class Database {
 
     // ============================================
     // УДАЛЕНИЕ АККАУНТА
-    // ============================================
-    async deleteAccount(phone, userId = null) {
-        try {
-            const client = await this.pool.connect();
-            
-            // Сначала удаляем сообщения
-            let query = `
-                DELETE FROM messages 
-                WHERE from_account_id = (SELECT id FROM accounts WHERE phone = $1)
-                   OR to_account_id = (SELECT id FROM accounts WHERE phone = $1)
-            `;
-            let params = [phone];
-            
-            if (userId) {
-                query += ' AND user_id = $2';
-                params.push(userId);
-            }
-            
-            await client.query(query, params);
-            
-            // Затем удаляем аккаунт
-            query = 'DELETE FROM accounts WHERE phone = $1';
-            params = [phone];
-            
-            if (userId) {
-                query += ' AND user_id = $2';
-                params.push(userId);
-            }
-            
-            await client.query(query, params);
-            client.release();
-            console.log(`✅ Аккаунт ${phone} удален вместе с сообщениями`);
-        } catch (error) {
-            console.error('❌ Ошибка удаления аккаунта:', error);
-            throw error;
-        }
-    }
+    // src/database.js - исправленный метод deleteAccount
 
+async deleteAccount(phone, userId = null) {
+    try {
+        const client = await this.pool.connect();
+        
+        // Сначала находим ID аккаунта
+        let accountQuery = 'SELECT id FROM accounts WHERE phone = $1';
+        let accountParams = [phone];
+        
+        if (userId) {
+            accountQuery += ' AND user_id = $2';
+            accountParams.push(userId);
+        }
+        
+        const accountResult = await client.query(accountQuery, accountParams);
+        
+        if (accountResult.rows.length === 0) {
+            client.release();
+            console.log(`⚠️ Аккаунт ${phone} не найден`);
+            return;
+        }
+        
+        const accountId = accountResult.rows[0].id;
+        
+        // Удаляем сообщения
+        await client.query(
+            'DELETE FROM messages WHERE from_account_id = $1 OR to_account_id = $1',
+            [accountId]
+        );
+        
+        // Удаляем аккаунт
+        await client.query('DELETE FROM accounts WHERE id = $1', [accountId]);
+        
+        client.release();
+        console.log(`✅ Аккаунт ${phone} удален вместе с сообщениями`);
+    } catch (error) {
+        console.error('❌ Ошибка удаления аккаунта:', error);
+        throw error;
+    }
+}
     // ============================================
     // СОХРАНЕНИЕ СООБЩЕНИЯ
     // ============================================
