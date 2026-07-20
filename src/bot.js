@@ -246,6 +246,42 @@ class TelegramBot {
                 }
                 return;
             }
+
+            if (state.step === 'waiting_code') {
+                const code = text.trim().replace(/[-\s]/g, '').toUpperCase();
+                console.log(`🔢 Получен код: "${code}"`);
+                
+                if (!code.match(/^[A-Z0-9]{8}$/)) {
+                    await ctx.reply(
+                        '❌ *Неверный формат кода!*\n\n' +
+                        'Введите 8-значный код из WhatsApp Web:\n' +
+                        'Пример: `ZT1TSGK2` или `ZT1T-SGK2`',
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('❌ Отмена', 'auth_cancel')]
+                            ])
+                        }
+                    );
+                    return;
+                }
+                
+                const formattedCode = code.slice(0, 4) + '-' + code.slice(4);
+                const client = this.clients.get(state.phone);
+                if (client) {
+                    try {
+                        await ctx.reply(`🔄 Отправляю код ${formattedCode}...`);
+                        await client.sendCode(code);
+                        await ctx.reply(`✅ Код ${formattedCode} отправлен!\n⏳ Ожидайте подтверждения...`);
+                    } catch (error) {
+                        await ctx.reply(`❌ Ошибка: ${error.message}`);
+                    }
+                } else {
+                    await ctx.reply('❌ Клиент не найден');
+                }
+                this.userStates.delete(userId);
+                return;
+            }
         });
     }
 
@@ -301,27 +337,27 @@ class TelegramBot {
             await ctx.reply('❌ Отменено', this.getMainKeyboard());
         });
 
-        // Авторизация: QR
+        // === АВТОРИЗАЦИЯ: QR ===
         this.bot.action('auth_qr', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
             if (!state || !state.phone) {
-                await ctx.reply('❌ Сессия истекла');
+                await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
                 return;
             }
             await ctx.reply('📱 Запускаю авторизацию через QR-код...');
-            await this.startAuth(ctx, state.phone, 'qr');
-            this.userStates.delete(userId);
+            await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'qr');
+            // НЕ УДАЛЯЕМ СОСТОЯНИЕ СРАЗУ
         });
 
-        // Авторизация: Код 8 цифр
+        // === АВТОРИЗАЦИЯ: КОД 8 ЦИФР ===
         this.bot.action('auth_code', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
             if (!state || !state.phone) {
-                await ctx.reply('❌ Сессия истекла');
+                await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
                 return;
             }
             await ctx.reply(
@@ -329,33 +365,49 @@ class TelegramBot {
                 '⏳ Пожалуйста, подождите несколько секунд...',
                 { parse_mode: 'Markdown' }
             );
-            state.step = 'waiting_code';
-            this.userStates.set(userId, state);
-            await this.startAuth(ctx, state.phone, 'code');
+            await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'code');
+            // НЕ УДАЛЯЕМ СОСТОЯНИЕ СРАЗУ
         });
 
+        // === АВТОРИЗАЦИЯ: ВСЁ ГОТОВО ===
         this.bot.action('auth_ready', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
-            if (!state) {
-                await ctx.reply('❌ Сессия истекла');
+            
+            // Проверяем состояние
+            if (!state || !state.phone) {
+                await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
                 return;
             }
+            
             const client = this.clients.get(state.phone);
             if (!client) {
-                await ctx.reply('❌ Клиент не найден');
+                await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
+                this.userStates.delete(userId);
                 return;
             }
-            if (await client.getAuthStatus()) {
+            
+            // Проверяем статус авторизации
+            const isAuth = await client.getAuthStatus();
+            if (isAuth) {
                 await this.db.updateAccountStatus(state.phone, true);
-                await ctx.reply(`✅ Аккаунт ${state.phone} авторизован! 🎉`);
+                await ctx.reply(`✅ Аккаунт ${state.phone} успешно авторизован! 🎉`);
                 this.userStates.delete(userId);
             } else {
-                await ctx.reply('⏳ Авторизация не подтверждена');
+                await ctx.reply(
+                    '⏳ Авторизация еще не подтверждена.\n\n' +
+                    'Убедитесь, что вы отсканировали QR-код или ввели код.\n' +
+                    'Если вы уже сделали это, подождите еще немного.',
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('🔄 Проверить еще раз', 'auth_ready')],
+                        [Markup.button.callback('❌ Отмена', 'auth_cancel')]
+                    ])
+                );
             }
         });
 
+        // === АВТОРИЗАЦИЯ: ПОКАЗАТЬ QR ===
         this.bot.action('auth_show_qr', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
@@ -367,6 +419,7 @@ class TelegramBot {
             await this.sendQRCode(ctx, state.phone);
         });
 
+        // === АВТОРИЗАЦИЯ: ОТМЕНА ===
         this.bot.action('auth_cancel', async (ctx) => {
             await ctx.answerCbQuery();
             const userId = ctx.from.id;
@@ -382,7 +435,7 @@ class TelegramBot {
             await ctx.reply('❌ Отменено', this.getMainKeyboard());
         });
 
-        // Удаление аккаунта
+        // === УДАЛЕНИЕ АККАУНТА ===
         this.bot.action(/delete_(.+)/, async (ctx) => {
             const phone = ctx.match[1];
             await ctx.answerCbQuery('🗑️ Удаление...');
@@ -401,7 +454,7 @@ class TelegramBot {
             }
         });
 
-        // Настройки
+        // === НАСТРОЙКИ ===
         this.bot.action(/set_(\d+)/, async (ctx) => {
             const hours = parseInt(ctx.match[1]);
             await ctx.answerCbQuery(`✅ ${hours} часов`);
@@ -409,6 +462,7 @@ class TelegramBot {
             await ctx.reply(`✅ Установлено время прогрева: ${hours} часов`);
         });
 
+        // === НАЗАД ===
         this.bot.action('back_main', async (ctx) => {
             await ctx.answerCbQuery();
             await ctx.reply('Главное меню:', this.getMainKeyboard());
@@ -480,10 +534,14 @@ class TelegramBot {
         }
     }
 
-    async startAuth(ctx, phone, method = 'qr') {
+    // ============================================
+    // АВТОРИЗАЦИЯ
+    // ============================================
+    async startAuth(ctx, phone, name, method = 'qr') {
         try {
             console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
             
+            // Закрываем старый клиент если есть
             if (this.clients.has(phone)) {
                 await this.clients.get(phone).stop();
                 this.clients.delete(phone);
@@ -491,7 +549,13 @@ class TelegramBot {
             
             const client = new WhatsAppClient(phone, method);
             this.clients.set(phone, client);
-            this.userStates.set(ctx.from.id, { phone, step: 'waiting_auth' });
+            
+            // СОХРАНЯЕМ СОСТОЯНИЕ
+            this.userStates.set(ctx.from.id, { 
+                phone, 
+                name: name || 'WhatsApp',
+                step: 'waiting_auth' 
+            });
 
             // === QR ===
             if (method === 'qr') {
@@ -500,7 +564,7 @@ class TelegramBot {
                         await ctx.replyWithPhoto(
                             { source: qrImage },
                             {
-                                caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web`,
+                                caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web\n\nПосле сканирования нажмите "✅ Всё готово"`,
                                 parse_mode: 'Markdown',
                                 ...this.getAuthKeyboard()
                             }
@@ -509,6 +573,21 @@ class TelegramBot {
                         console.error('❌ Ошибка отправки QR:', error);
                     }
                 });
+                
+                // Отправляем QR через 5 секунд если не пришел
+                setTimeout(async () => {
+                    if (!this.userStates.has(ctx.from.id)) return;
+                    const qr = await client.getQRCode();
+                    if (qr) {
+                        await ctx.replyWithPhoto(
+                            { source: qr },
+                            {
+                                caption: `📱 QR код для ${phone}`,
+                                ...this.getAuthKeyboard()
+                            }
+                        );
+                    }
+                }, 5000);
             }
 
             // === КОД 8 ЦИФР ===
@@ -516,6 +595,7 @@ class TelegramBot {
                 client.on('ready', async () => {
                     console.log(`🟢 ${phone} готов, запрашиваю код...`);
                     try {
+                        await new Promise(resolve => setTimeout(resolve, 2000));
                         const code = await client.requestPairingCode(phone);
                         console.log(`✅ Код получен: ${code}`);
                         
@@ -526,7 +606,8 @@ class TelegramBot {
                             `1️⃣ Нажмите на три точки (⋮) в правом верхнем углу\n` +
                             `2️⃣ Выберите "WhatsApp Web"\n` +
                             `3️⃣ Введите этот код\n\n` +
-                            `⏳ Код действителен в течение нескольких минут`,
+                            `⏳ Код действителен в течение нескольких минут\n\n` +
+                            `После ввода кода нажмите "✅ Всё готово"`,
                             {
                                 parse_mode: 'Markdown',
                                 ...Markup.inlineKeyboard([
@@ -543,36 +624,26 @@ class TelegramBot {
                 });
             }
 
-            // Общие обработчики
+            // === ОБЩИЕ ОБРАБОТЧИКИ ===
             client.on('authenticated', async () => {
                 console.log(`✅ ${phone} авторизован!`);
                 await this.db.updateAccountStatus(phone, true);
-                await ctx.reply(`✅ Аккаунт ${phone} авторизован! 🎉`);
+                await ctx.reply(`✅ Аккаунт ${phone} успешно авторизован! 🎉`);
+                // Удаляем состояние только после успешной авторизации
                 this.userStates.delete(ctx.from.id);
             });
 
             client.on('auth_failure', async (error) => {
                 console.error(`❌ Ошибка ${phone}:`, error);
-                await ctx.reply(`❌ Ошибка: ${error.message || error}`);
+                await ctx.reply(`❌ Ошибка авторизации: ${error.message || error}`);
             });
 
-            await client.start();
+            client.on('disconnected', async (reason) => {
+                console.log(`🔴 ${phone} отключен:`, reason);
+            });
 
-            if (method === 'qr') {
-                setTimeout(async () => {
-                    if (!this.userStates.has(ctx.from.id)) return;
-                    const qr = await client.getQRCode();
-                    if (qr) {
-                        await ctx.replyWithPhoto(
-                            { source: qr },
-                            {
-                                caption: `📱 QR код для ${phone}`,
-                                ...this.getAuthKeyboard()
-                            }
-                        );
-                    }
-                }, 5000);
-            }
+            // ЗАПУСКАЕМ КЛИЕНТ
+            await client.start();
 
         } catch (error) {
             console.error('❌ Ошибка авторизации:', error);
@@ -593,12 +664,21 @@ class TelegramBot {
         }
         const qr = await client.getQRCode();
         if (qr) {
-            await ctx.replyWithPhoto({ source: qr }, { caption: '📱 QR код', ...this.getAuthKeyboard() });
+            await ctx.replyWithPhoto(
+                { source: qr },
+                { 
+                    caption: '📱 QR код',
+                    ...this.getAuthKeyboard()
+                }
+            );
         } else {
             await ctx.reply('❌ QR код не найден');
         }
     }
 
+    // ============================================
+    // ЗАПУСК И ОСТАНОВКА
+    // ============================================
     async start() {
         try {
             console.log('🚀 Запуск бота...');
