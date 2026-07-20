@@ -12,20 +12,32 @@ class GeminiAI {
         console.log(`📦 Модель: ${config.GEMINI_MODEL || 'gemini-flash-latest'}`);
     }
 
-    async generateMessage(prompt) {
+    async generateMessage(prompt, retries = 3) {
         if (!this.model) {
             console.log('⚠️ Gemini не доступен, использую fallback');
             return this.getFallbackMessage();
         }
 
-        try {
-            const result = await this.model.generateContent(prompt);
-            const response = await result.response;
-            return response.text();
-        } catch (error) {
-            console.error('❌ Ошибка генерации:', error);
-            return this.getFallbackMessage();
+        for (let i = 0; i < retries; i++) {
+            try {
+                const result = await this.model.generateContent(prompt);
+                const response = await result.response;
+                return response.text();
+            } catch (error) {
+                console.log(`⚠️ Попытка ${i + 1}/${retries}: ${error.message}`);
+                
+                if (i < retries - 1) {
+                    const delay = Math.pow(2, i) * 1000;
+                    console.log(`⏳ Ждем ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    console.error('❌ Все попытки не удались');
+                    return this.getFallbackMessage();
+                }
+            }
         }
+        
+        return this.getFallbackMessage();
     }
 
     getFallbackMessage() {
@@ -49,7 +61,6 @@ class GeminiAI {
         Диалог должен быть дружеским, неформальным, на русском языке.
         Ответ должен быть в формате: "Имя: сообщение"
         Напиши только ответ второго человека.`;
-
         return await this.generateMessage(prompt);
     }
 
@@ -57,14 +68,12 @@ class GeminiAI {
         const prompt = `Напиши дружеское сообщение от ${account1} к ${account2}. 
         Сообщение должно быть естественным и неформальным на русском языке.
         Длина: 1-2 предложения. Напиши только текст сообщения.`;
-
         return await this.generateMessage(prompt);
     }
 
     async generateSmileMessage(account1, account2) {
         const prompt = `Напиши сообщение от ${account1} к ${account2} используя только смайлики. 
         Используй 3-5 смайликов для выражения эмоций.`;
-
         const result = await this.generateMessage(prompt);
         return result || '😊😍❤️✨🎉';
     }
@@ -73,14 +82,12 @@ class GeminiAI {
         const prompt = `Напиши голосовое сообщение от ${account1} к ${account2}.
         Сообщение должно быть разговорным, как в голосовом чате.
         Длина: 1-2 предложения. Напиши только текст.`;
-
         return await this.generateMessage(prompt);
     }
 
     async generatePhotoMessage(account1, account2) {
         const prompt = `Напиши сообщение от ${account1} к ${account2} с описанием фото.
         Длина: 1-2 предложения. Напиши только текст сообщения.`;
-
         return await this.generateMessage(prompt);
     }
 }
