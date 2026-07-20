@@ -22,7 +22,6 @@ class ProgressService {
         this.startTime = new Date();
         this.messagesSent = 0;
 
-        // Запускаем цикл отправки сообщений
         await this.runProgressLoop();
     }
 
@@ -49,14 +48,12 @@ class ProgressService {
 
             if (activePairs.length === 0) {
                 console.log('⚠️ Нет активных пар для прогрева');
-                // Ждем 30 секунд и проверяем снова
                 setTimeout(() => this.runProgressLoop(), 30000);
                 return;
             }
 
             console.log(`📨 Найдено ${activePairs.length} активных пар`);
 
-            // Для каждой пары отправляем сообщение
             for (const pair of activePairs) {
                 if (!this.isRunning) break;
 
@@ -64,7 +61,6 @@ class ProgressService {
                     await this.sendMessageForPair(pair);
                     this.messagesSent++;
                     
-                    // Задержка между сообщениями
                     const delay = Math.floor(Math.random() * 30000) + 10000;
                     await this.sleep(delay);
                 } catch (error) {
@@ -72,7 +68,6 @@ class ProgressService {
                 }
             }
 
-            // Продолжаем цикл
             if (this.isRunning) {
                 setTimeout(() => this.runProgressLoop(), 5000);
             }
@@ -92,8 +87,6 @@ class ProgressService {
             );
 
             console.log(`💬 Сообщение для пары ${pair.id}: ${message}`);
-            
-            // Обновляем статистику
             await this.db.incrementMessages(pair.id);
             
         } catch (error) {
