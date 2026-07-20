@@ -8,3 +8,4 @@ logs/
 *.seed
 *.pid.lock
 auth_info_baileys/
+messages.txt
