@@ -1,4 +1,4 @@
-// src/bot.js
+// src/bot.js - ПОЛНАЯ ВЕРСИЯ БЕЗ ПАР
 const { Telegraf, Markup, session } = require('telegraf');
 const config = require('./config');
 const Database = require('./database');
@@ -28,10 +28,12 @@ class TelegramBot {
         this.setupActions();
         this.setupErrorHandler();
 
+        // Автоматическая проверка каждые 5 минут
         setInterval(() => {
             this.autoCheckAccounts();
         }, 5 * 60 * 1000);
 
+        // Мониторинг памяти
         setInterval(() => {
             const used = process.memoryUsage();
             console.log(`📊 Общая память: RSS=${Math.round(used.rss / 1024 / 1024)}MB, Heap=${Math.round(used.heapUsed / 1024 / 1024)}MB`);
@@ -56,6 +58,9 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // КЛАВИАТУРЫ
+    // ============================================
     getMainKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('📊 Статистика', 'main_stats')],
@@ -95,6 +100,9 @@ class TelegramBot {
         ]);
     }
 
+    // ============================================
+    // КОМАНДЫ
+    // ============================================
     setupCommands() {
         this.bot.use(async (ctx, next) => {
             console.log(`📨 [${new Date().toISOString()}] Сообщение:`, {
@@ -228,6 +236,9 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // МЕТОДЫ КОМАНД
+    // ============================================
     async startAddAccount(ctx) {
         const userId = ctx.from.id;
         this.userStates.set(userId, { step: 'waiting_phone', phone: null, name: null });
@@ -322,6 +333,9 @@ class TelegramBot {
         );
     }
 
+    // ============================================
+    // АВТОМАТИЧЕСКАЯ ПРОВЕРКА АККАУНТОВ
+    // ============================================
     async autoCheckAccounts() {
         try {
             console.log('═══════════════════════════════════════');
@@ -484,6 +498,160 @@ class TelegramBot {
         }
     }
 
+    // ============================================
+    // ОБРАБОТЧИКИ ТЕКСТА
+    // ============================================
+    setupHandlers() {
+        this.bot.on('text', async (ctx) => {
+            const userId = ctx.from.id;
+            const state = this.userStates.get(userId);
+            const text = ctx.message.text;
+
+            console.log(`📝 Текст от ${userId}: "${text}"`);
+
+            // Кнопки меню
+            if (text === '📊 Статистика') {
+                await this.showStats(ctx);
+                return;
+            }
+            if (text === '▶️ Запустить прогрев') {
+                if (this.service.isRunning) {
+                    await ctx.reply('⚠️ Прогрев уже запущен!');
+                    return;
+                }
+                await ctx.reply('🔄 Запускаю прогрев...');
+                await this.service.start();
+                await ctx.reply('✅ Прогрев запущен!');
+                return;
+            }
+            if (text === '⏹ Остановить прогрев') {
+                if (!this.service.isRunning) {
+                    await ctx.reply('⚠️ Прогрев не запущен!');
+                    return;
+                }
+                await this.service.stop();
+                await ctx.reply('⏹ Прогрев остановлен!');
+                return;
+            }
+            if (text === '➕ Добавить аккаунт') {
+                return this.bot.command('add_account', ctx);
+            }
+            if (text === '📋 Аккаунты') {
+                await this.showAccounts(ctx);
+                return;
+            }
+            if (text === '⚙️ Настройки') {
+                await ctx.reply(
+                    '⚙️ *Настройки*\n\nВыберите время прогрева:',
+                    { parse_mode: 'Markdown', ...this.getSettingsKeyboard() }
+                );
+                return;
+            }
+            if (text === '🆘 Помощь') {
+                return this.bot.command('help', ctx);
+            }
+            if (text === '❌ Удалить аккаунт') {
+                await ctx.reply('Введите номер телефона для удаления:');
+                this.userStates.set(userId, { step: 'waiting_delete' });
+                return;
+            }
+
+            if (!state) return;
+
+            // Ожидание номера
+            if (state.step === 'waiting_phone') {
+                if (text === '❌ Отмена') {
+                    this.userStates.delete(userId);
+                    await ctx.reply('❌ Отменено', this.getMainKeyboard());
+                    return;
+                }
+                const phone = text.trim();
+                if (!phone.match(/^\+?\d{10,15}$/)) {
+                    await ctx.reply('❌ Неверный формат. Используйте +79637332642');
+                    return;
+                }
+                const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+                
+                try {
+                    await this.db.addAccount(normalizedPhone, userId, 'WhatsApp');
+                    await ctx.reply(`✅ Аккаунт ${normalizedPhone} добавлен!`);
+                    await ctx.reply(
+                        `🔐 *Выберите метод авторизации для ${normalizedPhone}:*`,
+                        { parse_mode: 'Markdown', ...this.getAuthMethodKeyboard() }
+                    );
+                    state.phone = normalizedPhone;
+                    state.step = 'waiting_auth_method';
+                    this.userStates.set(userId, state);
+                } catch (error) {
+                    console.error('❌ Ошибка добавления аккаунта:', error);
+                    await ctx.reply(`❌ Ошибка: ${error.message}`);
+                    this.userStates.delete(userId);
+                }
+                return;
+            }
+
+            // Ожидание кода
+            if (state.step === 'waiting_code') {
+                const code = text.trim().replace(/[-\s]/g, '').toUpperCase();
+                console.log(`🔢 Получен код: "${code}"`);
+                
+                if (!code.match(/^[A-Z0-9]{8}$/)) {
+                    await ctx.reply(
+                        '❌ *Неверный формат кода!*\n\n' +
+                        'Введите 8-значный код из WhatsApp Web:\n' +
+                        'Пример: `ZT1TSGK2` или `ZT1T-SGK2`',
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('❌ Отмена', 'auth_cancel')]
+                            ])
+                        }
+                    );
+                    return;
+                }
+                
+                const formattedCode = code.slice(0, 4) + '-' + code.slice(4);
+                const client = this.clients.get(state.phone);
+                if (client) {
+                    try {
+                        await ctx.reply(`🔄 Отправляю код ${formattedCode}...`);
+                        await client.sendCode(code);
+                        await ctx.reply(`✅ Код ${formattedCode} отправлен!\n⏳ Ожидайте подтверждения...`);
+                    } catch (error) {
+                        await ctx.reply(`❌ Ошибка: ${error.message}`);
+                    }
+                } else {
+                    await ctx.reply('❌ Клиент не найден');
+                }
+                this.userStates.delete(userId);
+                return;
+            }
+
+            // Ожидание удаления
+            if (state.step === 'waiting_delete') {
+                const phone = text.trim();
+                if (!phone.match(/^\+?\d{10,15}$/)) {
+                    await ctx.reply('❌ Неверный формат');
+                    return;
+                }
+                try {
+                    await this.db.deleteAccount(phone, userId);
+                    if (this.clients.has(phone)) {
+                        await this.clients.get(phone).stop();
+                        this.clients.delete(phone);
+                    }
+                    await ctx.reply(`✅ Аккаунт ${phone} удален!`, this.getMainKeyboard());
+                } catch (error) {
+                    await ctx.reply(`❌ Ошибка: ${error.message}`);
+                }
+                this.userStates.delete(userId);
+            }
+        });
+    }
+
+    // ============================================
+    // ОТОБРАЖЕНИЕ ДАННЫХ
+    // ============================================
     async showAccounts(ctx) {
         try {
             const userId = ctx.from.id;
@@ -547,6 +715,345 @@ class TelegramBot {
         }
     }
 
+    // ============================================
+    // INLINE КНОПКИ (ACTIONS)
+    // ============================================
+    setupActions() {
+        // Главное меню
+        this.bot.action('main_stats', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showStats(ctx);
+        });
+
+        this.bot.action('main_start', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.startProgress(ctx);
+        });
+
+        this.bot.action('main_stop', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.stopProgress(ctx);
+        });
+
+        this.bot.action('main_add', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.startAddAccount(ctx);
+        });
+
+        this.bot.action('main_accounts', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showAccounts(ctx);
+        });
+
+        this.bot.action('main_check', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.reply('🔄 Проверяю состояние аккаунтов...');
+            await this.autoCheckAccounts();
+            await ctx.reply('✅ Проверка завершена. Результаты в логах.');
+        });
+
+        this.bot.action('main_progress_status', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showProgressStatus(ctx);
+        });
+
+        this.bot.action('main_settings', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.reply(
+                '⚙️ *Настройки*\n\nВыберите время прогрева:',
+                { parse_mode: 'Markdown', ...this.getSettingsKeyboard() }
+            );
+        });
+
+        this.bot.action('main_help', async (ctx) => {
+            await ctx.answerCbQuery();
+            await this.showHelp(ctx);
+        });
+
+        // Добавление аккаунта
+        this.bot.action('add_cancel', async (ctx) => {
+            await ctx.answerCbQuery();
+            this.userStates.delete(ctx.from.id);
+            await ctx.reply('❌ Отменено', this.getMainKeyboard());
+        });
+
+        // === АВТОРИЗАЦИЯ: QR ===
+        this.bot.action('auth_qr', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            const state = this.userStates.get(userId);
+            if (!state || !state.phone) {
+                await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+                return;
+            }
+            await ctx.reply('📱 Запускаю авторизацию через QR-код...');
+            await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'qr');
+        });
+
+        // === АВТОРИЗАЦИЯ: КОД 8 ЦИФР ===
+        this.bot.action('auth_code', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            const state = this.userStates.get(userId);
+            if (!state || !state.phone) {
+                await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+                return;
+            }
+            await ctx.reply(
+                '🔢 *Генерация 8-значного кода...*\n\n⏳ Пожалуйста, подождите несколько секунд...',
+                { parse_mode: 'Markdown' }
+            );
+            await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'code');
+        });
+
+        // === АВТОРИЗАЦИЯ: ВСЁ ГОТОВО ===
+        this.bot.action('auth_ready', async (ctx) => {
+            try {
+                const userId = ctx.from.id;
+                const state = this.userStates.get(userId);
+                
+                if (!state || !state.phone) {
+                    await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+                    return;
+                }
+                
+                const client = this.clients.get(state.phone);
+                if (!client) {
+                    await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
+                    this.userStates.delete(userId);
+                    return;
+                }
+                
+                let statusMsg = await ctx.reply(
+                    `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Пожалуйста, подождите...`,
+                    { parse_mode: 'Markdown' }
+                );
+                
+                let isAuth = false;
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                while (attempts < maxAttempts) {
+                    try {
+                        isAuth = await client.getAuthStatus();
+                        if (isAuth) break;
+                    } catch (error) {
+                        console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
+                    }
+                    
+                    attempts++;
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    
+                    if (attempts % 3 === 0) {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat.id,
+                            statusMsg.message_id,
+                            null,
+                            `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Попытка ${attempts}/${maxAttempts}\n\n💡 Убедитесь, что вы отсканировали QR-код`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
+                }
+                
+                if (isAuth) {
+                    await this.db.updateAccountStatus(state.phone, true);
+                    
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMsg.message_id,
+                        null,
+                        `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
+                        `⚙️ *Настройка прогрева:*\n1️⃣ Выберите время прогрева:\n   🟢 6 часов\n   🟢 12 часов\n   🟢 24 часа\n\n2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [
+                                    Markup.button.callback('🕐 6 часов', 'set_progress_6'),
+                                    Markup.button.callback('🕐 12 часов', 'set_progress_12'),
+                                    Markup.button.callback('🕐 24 часа', 'set_progress_24')
+                                ],
+                                [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
+                                [Markup.button.callback('📊 Статистика', 'main_stats')]
+                            ])
+                        }
+                    );
+                    
+                    this.userStates.delete(userId);
+                } else {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMsg.message_id,
+                        null,
+                        `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n⏱️ Время ожидания истекло.\n\n🔄 Попробуйте снова через /add_account`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    this.userStates.delete(userId);
+                }
+            } catch (error) {
+                console.error('❌ Ошибка auth_ready:', error);
+                await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
+            }
+        });
+
+        // Время прогрева
+        this.bot.action('set_progress_6', async (ctx) => {
+            await ctx.answerCbQuery('✅ Установлено 6 часов');
+            config.PROGRESS_DURATION_HOURS = 6;
+            await ctx.reply(`✅ *Установлено время прогрева: 6 часов*`);
+        });
+
+        this.bot.action('set_progress_12', async (ctx) => {
+            await ctx.answerCbQuery('✅ Установлено 12 часов');
+            config.PROGRESS_DURATION_HOURS = 12;
+            await ctx.reply(`✅ *Установлено время прогрева: 12 часов*`);
+        });
+
+        this.bot.action('set_progress_24', async (ctx) => {
+            await ctx.answerCbQuery('✅ Установлено 24 часа');
+            config.PROGRESS_DURATION_HOURS = 24;
+            await ctx.reply(`✅ *Установлено время прогрева: 24 часа*`);
+        });
+
+        // Авторизация: показать QR
+        this.bot.action('auth_show_qr', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            const state = this.userStates.get(userId);
+            if (!state || !state.phone) {
+                await ctx.reply('❌ Нет активной сессии');
+                return;
+            }
+            await this.sendQRCode(ctx, state.phone);
+        });
+
+        // Авторизация: отмена
+        this.bot.action('auth_cancel', async (ctx) => {
+            await ctx.answerCbQuery();
+            const userId = ctx.from.id;
+            const state = this.userStates.get(userId);
+            if (state && state.phone) {
+                const client = this.clients.get(state.phone);
+                if (client) {
+                    await client.stop();
+                    this.clients.delete(state.phone);
+                }
+            }
+            this.userStates.delete(userId);
+            await ctx.reply('❌ Отменено', this.getMainKeyboard());
+        });
+
+        // Управление аккаунтом
+        this.bot.action(/^account_(.+)/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            const account = await this.db.getAccount(phone, userId);
+            if (!account) {
+                await ctx.answerCbQuery('❌ Аккаунт не найден');
+                await ctx.reply('❌ Аккаунт не принадлежит вам');
+                return;
+            }
+            
+            await ctx.answerCbQuery();
+            const status = account.is_authenticated ? '🟢 авторизован' : '🔴 не авторизован';
+            
+            await ctx.reply(
+                `📱 *Аккаунт ${phone}*\n\n📊 Статус: ${status}\n🆔 ID: ${account.id}\n📅 Создан: ${new Date(account.created_at).toLocaleString()}\n\n🔧 *Доступные действия:*`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [
+                            Markup.button.callback('📱 Авторизовать (QR)', `auth_phone_${phone}_qr`),
+                            Markup.button.callback('🔢 Авторизовать (код)', `auth_phone_${phone}_code`)
+                        ],
+                        [Markup.button.callback('🗑️ Удалить аккаунт', `delete_${phone}`)],
+                        [Markup.button.callback('🔙 Назад', 'main_accounts')]
+                    ])
+                }
+            );
+        });
+
+        // Авторизация из аккаунтов (QR)
+        this.bot.action(/^auth_phone_(.+)_qr$/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            const account = await this.db.getAccount(phone, userId);
+            if (!account) {
+                try { await ctx.answerCbQuery('❌ Аккаунт не найден'); } catch (e) {}
+                await ctx.reply('❌ Аккаунт не принадлежит вам');
+                return;
+            }
+            
+            try { await ctx.answerCbQuery('📱 Запускаю авторизацию...'); } catch (e) {}
+            
+            this.userStates.set(userId, { phone, step: 'waiting_auth', name: account.name || 'WhatsApp' });
+            await ctx.reply('📱 Запускаю авторизацию через QR-код...');
+            await this.startAuth(ctx, phone, account.name || 'WhatsApp', 'qr');
+        });
+
+        // Авторизация из аккаунтов (код)
+        this.bot.action(/^auth_phone_(.+)_code$/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            const account = await this.db.getAccount(phone, userId);
+            if (!account) {
+                try { await ctx.answerCbQuery('❌ Аккаунт не найден'); } catch (e) {}
+                await ctx.reply('❌ Аккаунт не принадлежит вам');
+                return;
+            }
+            
+            try { await ctx.answerCbQuery('🔢 Запускаю авторизацию...'); } catch (e) {}
+            
+            this.userStates.set(userId, { phone, step: 'waiting_auth', name: account.name || 'WhatsApp' });
+            await ctx.reply('🔢 *Генерация 8-значного кода...*\n\n⏳ Пожалуйста, подождите...', { parse_mode: 'Markdown' });
+            await this.startAuth(ctx, phone, account.name || 'WhatsApp', 'code');
+        });
+
+        // Удаление аккаунта
+        this.bot.action(/delete_(.+)/, async (ctx) => {
+            const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
+            try { await ctx.answerCbQuery('🗑️ Удаление...'); } catch (e) {}
+            
+            try {
+                const account = await this.db.getAccount(phone, userId);
+                if (!account) {
+                    await ctx.reply('❌ Аккаунт не найден');
+                    return;
+                }
+                await this.db.deleteAccount(phone, userId);
+                if (this.clients.has(phone)) {
+                    await this.clients.get(phone).stop();
+                    this.clients.delete(phone);
+                }
+                await ctx.reply(`✅ Аккаунт ${phone} удален!`);
+                await this.showAccounts(ctx);
+            } catch (error) {
+                await ctx.reply(`❌ Ошибка: ${error.message}`);
+            }
+        });
+
+        // Настройки
+        this.bot.action(/set_(\d+)/, async (ctx) => {
+            const hours = parseInt(ctx.match[1]);
+            await ctx.answerCbQuery(`✅ ${hours} часов`);
+            config.PROGRESS_DURATION_HOURS = hours;
+            await ctx.reply(`✅ Установлено время прогрева: ${hours} часов`);
+        });
+
+        // Назад
+        this.bot.action('back_main', async (ctx) => {
+            await ctx.answerCbQuery();
+            await ctx.reply('Главное меню:', this.getMainKeyboard());
+        });
+    }
+
+    // ============================================
+    // АВТОРИЗАЦИЯ WHATSAPP
+    // ============================================
     async startAuth(ctx, phone, name, method = 'qr') {
         try {
             console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
@@ -661,6 +1168,9 @@ class TelegramBot {
         }
     }
 
+    // ============================================
+    // ЗАПУСК И ОСТАНОВКА
+    // ============================================
     async start() {
         try {
             console.log('🚀 Запуск бота...');
