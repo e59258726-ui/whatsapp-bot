@@ -1,5 +1,4 @@
-// src/whatsapp.js — полный файл с методом requestPairingCode
-
+// src/whatsapp.js
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -176,11 +175,9 @@ class WhatsAppClient {
                 throw new Error('Клиент не инициализирован');
             }
             
-            // Очищаем номер от "+" и пробелов
             const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
             console.log(`🔢 Запрос кода для ${cleanNumber}`);
             
-            // Запрашиваем 8-значный код
             const code = await this.client.requestPairingCode(cleanNumber);
             console.log(`✅ Код получен: ${code}`);
             
