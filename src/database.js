@@ -1,4 +1,4 @@
-// src/database.js
+// src/database.js - УБРАНЫ ПАРЫ
 const { Pool } = require('pg');
 const config = require('./config');
 
@@ -35,7 +35,6 @@ class Database {
         try {
             const client = await this.pool.connect();
 
-            // Таблица аккаунтов
             await client.query(`
                 CREATE TABLE IF NOT EXISTS accounts (
                     id SERIAL PRIMARY KEY,
@@ -48,47 +47,26 @@ class Database {
                 )
             `);
 
-            // Таблица пар
-            await client.query(`
-                CREATE TABLE IF NOT EXISTS pairs (
-                    id SERIAL PRIMARY KEY,
-                    account1_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-                    account2_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW(),
-                    UNIQUE(account1_id, account2_id)
-                )
-            `);
-
-            // Таблица сообщений
             await client.query(`
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
-                    pair_id INTEGER REFERENCES pairs(id) ON DELETE CASCADE,
                     from_account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
                     to_account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
                     content TEXT NOT NULL,
                     type VARCHAR(20) DEFAULT 'text',
-                    sent_at TIMESTAMP DEFAULT NOW(),
-                    is_delivered BOOLEAN DEFAULT FALSE,
-                    is_read BOOLEAN DEFAULT FALSE
+                    sent_at TIMESTAMP DEFAULT NOW()
                 )
             `);
 
-            // Таблица статистики
             await client.query(`
                 CREATE TABLE IF NOT EXISTS stats (
                     id SERIAL PRIMARY KEY,
-                    pair_id INTEGER REFERENCES pairs(id) ON DELETE CASCADE,
                     date DATE DEFAULT CURRENT_DATE,
                     messages_count INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    UNIQUE(pair_id, date)
+                    created_at TIMESTAMP DEFAULT NOW()
                 )
             `);
 
-            // Таблица настроек
             await client.query(`
                 CREATE TABLE IF NOT EXISTS settings (
                     key VARCHAR(50) PRIMARY KEY,
@@ -105,9 +83,6 @@ class Database {
         }
     }
 
-    // ============================================
-    // РАБОТА С АККАУНТАМИ
-    // ============================================
     async addAccount(phone, name = 'WhatsApp') {
         try {
             const client = await this.pool.connect();
@@ -175,89 +150,13 @@ class Database {
         }
     }
 
-    // ============================================
-    // РАБОТА С ПАРАМИ (АВТОМАТИЧЕСКИ)
-    // ============================================
-    async getPairs() {
-        try {
-            const client = await this.pool.connect();
-            const result = await client.query(`
-                SELECT 
-                    p.*,
-                    a1.phone as phone1,
-                    a1.id as account1_id,
-                    a1.is_authenticated as auth1,
-                    a2.phone as phone2,
-                    a2.id as account2_id,
-                    a2.is_authenticated as auth2
-                FROM pairs p
-                JOIN accounts a1 ON p.account1_id = a1.id
-                JOIN accounts a2 ON p.account2_id = a2.id
-                ORDER BY p.created_at DESC
-            `);
-            client.release();
-            return result.rows;
-        } catch (error) {
-            console.error('❌ Ошибка получения пар:', error);
-            throw error;
-        }
-    }
-
-    async createPair(account1Id, account2Id) {
+    async saveMessage(fromAccountId, toAccountId, content, type = 'text') {
         try {
             const client = await this.pool.connect();
             const result = await client.query(
-                'INSERT INTO pairs (account1_id, account2_id) VALUES ($1, $2) ON CONFLICT (account1_id, account2_id) DO NOTHING RETURNING *',
-                [account1Id, account2Id]
-            );
-            client.release();
-            if (result.rows.length > 0) {
-                console.log(`✅ Пара создана: ${account1Id} ↔ ${account2Id}`);
-            }
-            return result.rows[0] || null;
-        } catch (error) {
-            console.error('❌ Ошибка создания пары:', error);
-            throw error;
-        }
-    }
-
-    async updatePairStatus(pairId, isActive) {
-        try {
-            const client = await this.pool.connect();
-            await client.query(
-                'UPDATE pairs SET is_active = $1, updated_at = NOW() WHERE id = $2',
-                [isActive, pairId]
-            );
-            client.release();
-            console.log(`✅ Статус пары ${pairId} обновлен: ${isActive}`);
-        } catch (error) {
-            console.error('❌ Ошибка обновления пары:', error);
-            throw error;
-        }
-    }
-
-    async deletePair(pairId) {
-        try {
-            const client = await this.pool.connect();
-            await client.query('DELETE FROM pairs WHERE id = $1', [pairId]);
-            client.release();
-            console.log(`✅ Пара ${pairId} удалена`);
-        } catch (error) {
-            console.error('❌ Ошибка удаления пары:', error);
-            throw error;
-        }
-    }
-
-    // ============================================
-    // РАБОТА С СООБЩЕНИЯМИ
-    // ============================================
-    async saveMessage(pairId, fromAccountId, toAccountId, content, type = 'text') {
-        try {
-            const client = await this.pool.connect();
-            const result = await client.query(
-                `INSERT INTO messages (pair_id, from_account_id, to_account_id, content, type) 
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [pairId, fromAccountId, toAccountId, content, type]
+                `INSERT INTO messages (from_account_id, to_account_id, content, type) 
+                 VALUES ($1, $2, $3, $4) RETURNING *`,
+                [fromAccountId, toAccountId, content, type]
             );
             client.release();
             return result.rows[0];
@@ -267,12 +166,12 @@ class Database {
         }
     }
 
-    async getMessages(pairId, limit = 50) {
+    async getMessages(limit = 50) {
         try {
             const client = await this.pool.connect();
             const result = await client.query(
-                `SELECT * FROM messages WHERE pair_id = $1 ORDER BY sent_at DESC LIMIT $2`,
-                [pairId, limit]
+                `SELECT * FROM messages ORDER BY sent_at DESC LIMIT $1`,
+                [limit]
             );
             client.release();
             return result.rows;
@@ -282,36 +181,34 @@ class Database {
         }
     }
 
-    // ============================================
-    // СТАТИСТИКА
-    // ============================================
-    async getStats(pairId) {
+    async getStats() {
         try {
             const client = await this.pool.connect();
-            let query = 'SELECT * FROM stats ORDER BY date DESC LIMIT 30';
-            let params = [];
-            if (pairId) {
-                query = 'SELECT * FROM stats WHERE pair_id = $1 ORDER BY date DESC LIMIT 30';
-                params = [pairId];
-            }
-            const result = await client.query(query, params);
+            const result = await client.query(`
+                SELECT 
+                    COUNT(DISTINCT a.id) as total_accounts,
+                    COUNT(DISTINCT a.id) FILTER (WHERE a.is_authenticated = true) as authenticated_accounts,
+                    COALESCE(SUM(s.messages_count), 0) as total_messages
+                FROM accounts a
+                LEFT JOIN stats s ON true
+            `);
             client.release();
-            return result.rows;
+            return result.rows[0];
         } catch (error) {
             console.error('❌ Ошибка получения статистики:', error);
             throw error;
         }
     }
 
-    async incrementMessages(pairId, count = 1) {
+    async incrementMessages(count = 1) {
         try {
             const client = await this.pool.connect();
             await client.query(
-                `INSERT INTO stats (pair_id, date, messages_count) 
-                 VALUES ($1, CURRENT_DATE, $2) 
-                 ON CONFLICT (pair_id, date) 
-                 DO UPDATE SET messages_count = stats.messages_count + $2`,
-                [pairId, count]
+                `INSERT INTO stats (date, messages_count) 
+                 VALUES (CURRENT_DATE, $1) 
+                 ON CONFLICT (date) 
+                 DO UPDATE SET messages_count = stats.messages_count + $1`,
+                [count]
             );
             client.release();
         } catch (error) {
@@ -320,31 +217,6 @@ class Database {
         }
     }
 
-    async getTotalStats() {
-        try {
-            const client = await this.pool.connect();
-            const result = await client.query(`
-                SELECT 
-                    COUNT(DISTINCT a.id) as total_accounts,
-                    COUNT(DISTINCT a.id) FILTER (WHERE a.is_authenticated = true) as authenticated_accounts,
-                    COUNT(DISTINCT p.id) as total_pairs,
-                    COUNT(DISTINCT p.id) FILTER (WHERE p.is_active = true) as active_pairs,
-                    SUM(s.messages_count) as total_messages
-                FROM accounts a
-                LEFT JOIN pairs p ON p.account1_id = a.id OR p.account2_id = a.id
-                LEFT JOIN stats s ON s.pair_id = p.id
-            `);
-            client.release();
-            return result.rows[0];
-        } catch (error) {
-            console.error('❌ Ошибка получения общей статистики:', error);
-            throw error;
-        }
-    }
-
-    // ============================================
-    // НАСТРОЙКИ
-    // ============================================
     async getSetting(key) {
         try {
             const client = await this.pool.connect();
@@ -372,9 +244,6 @@ class Database {
         }
     }
 
-    // ============================================
-    // ОТКЛЮЧЕНИЕ
-    // ============================================
     async disconnect() {
         try {
             if (this.pool) {
