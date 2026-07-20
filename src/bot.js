@@ -808,93 +808,98 @@ class TelegramBot {
 
         // === АВТОРИЗАЦИЯ: ВСЁ ГОТОВО ===
         this.bot.action('auth_ready', async (ctx) => {
+    try {
+        const userId = ctx.from.id;
+        const state = this.userStates.get(userId);
+        
+        if (!state || !state.phone) {
+            await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+            return;
+        }
+        
+        const client = this.clients.get(state.phone);
+        if (!client) {
+            await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
+            this.userStates.delete(userId);
+            return;
+        }
+        
+        let statusMsg = await ctx.reply(
+            `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Пожалуйста, подождите...`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        let isAuth = false;
+        let attempts = 0;
+        const maxAttempts = 10;
+        
+        while (attempts < maxAttempts) {
             try {
-                const userId = ctx.from.id;
-                const state = this.userStates.get(userId);
-                
-                if (!state || !state.phone) {
-                    await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
-                    return;
-                }
-                
-                const client = this.clients.get(state.phone);
-                if (!client) {
-                    await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
-                    this.userStates.delete(userId);
-                    return;
-                }
-                
-                let statusMsg = await ctx.reply(
-                    `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Пожалуйста, подождите...`,
+                isAuth = await client.getAuthStatus();
+                if (isAuth) break;
+            } catch (error) {
+                console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
+            }
+            
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            if (attempts % 3 === 0) {
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    statusMsg.message_id,
+                    null,
+                    `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Попытка ${attempts}/${maxAttempts}\n\n💡 Убедитесь, что вы ввели код в WhatsApp`,
                     { parse_mode: 'Markdown' }
                 );
-                
-                let isAuth = false;
-                let attempts = 0;
-                const maxAttempts = 10;
-                
-                while (attempts < maxAttempts) {
-                    try {
-                        isAuth = await client.getAuthStatus();
-                        if (isAuth) break;
-                    } catch (error) {
-                        console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
-                    }
-                    
-                    attempts++;
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    
-                    if (attempts % 3 === 0) {
-                        await ctx.telegram.editMessageText(
-                            ctx.chat.id,
-                            statusMsg.message_id,
-                            null,
-                            `⏳ *Ожидание подключения...*\n\n📱 Проверяю статус аккаунта...\n⏱️ Попытка ${attempts}/${maxAttempts}\n\n💡 Убедитесь, что вы отсканировали QR-код`,
-                            { parse_mode: 'Markdown' }
-                        );
-                    }
-                }
-                
-                if (isAuth) {
-                    await this.db.updateAccountStatus(state.phone, true);
-                    
-                    await ctx.telegram.editMessageText(
-                        ctx.chat.id,
-                        statusMsg.message_id,
-                        null,
-                        `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
-                        `⚙️ *Настройка прогрева:*\n1️⃣ Выберите время прогрева:\n   🟢 6 часов\n   🟢 12 часов\n   🟢 24 часа\n\n2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
-                        {
-                            parse_mode: 'Markdown',
-                            ...Markup.inlineKeyboard([
-                                [
-                                    Markup.button.callback('🕐 6 часов', 'set_progress_6'),
-                                    Markup.button.callback('🕐 12 часов', 'set_progress_12'),
-                                    Markup.button.callback('🕐 24 часа', 'set_progress_24')
-                                ],
-                                [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
-                                [Markup.button.callback('📊 Статистика', 'main_stats')]
-                            ])
-                        }
-                    );
-                    
-                    this.userStates.delete(userId);
-                } else {
-                    await ctx.telegram.editMessageText(
-                        ctx.chat.id,
-                        statusMsg.message_id,
-                        null,
-                        `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n⏱️ Время ожидания истекло.\n\n🔄 Попробуйте снова через /add_account`,
-                        { parse_mode: 'Markdown' }
-                    );
-                    this.userStates.delete(userId);
-                }
-            } catch (error) {
-                console.error('❌ Ошибка auth_ready:', error);
-                await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
             }
-        });
-
+        }
+        
+        if (isAuth) {
+            await this.db.updateAccountStatus(state.phone, true);
+            
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                statusMsg.message_id,
+                null,
+                `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
+                `⚙️ *Настройка прогрева:*\n` +
+                `1️⃣ Выберите время прогрева:\n` +
+                `   🟢 6 часов\n` +
+                `   🟢 12 часов\n` +
+                `   🟢 24 часа\n\n` +
+                `2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n` +
+                `📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [
+                            Markup.button.callback('🕐 6 часов', 'set_progress_6'),
+                            Markup.button.callback('🕐 12 часов', 'set_progress_12'),
+                            Markup.button.callback('🕐 24 часа', 'set_progress_24')
+                        ],
+                        [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
+                        [Markup.button.callback('📊 Статистика', 'main_stats')]
+                    ])
+                }
+            );
+            
+            this.userStates.delete(userId);
+        } else {
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                statusMsg.message_id,
+                null,
+                `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n⏱️ Время ожидания истекло.\n\n🔄 Попробуйте снова через /add_account`,
+                { parse_mode: 'Markdown' }
+            );
+            this.userStates.delete(userId);
+        }
+    } catch (error) {
+        console.error('❌ Ошибка auth_ready:', error);
+        await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
+    }
+});
         // Время прогрева
         this.bot.action('set_progress_6', async (ctx) => {
             await ctx.answerCbQuery('✅ Установлено 6 часов');
@@ -1054,110 +1059,133 @@ class TelegramBot {
     // ============================================
     // АВТОРИЗАЦИЯ WHATSAPP
     // ============================================
-    async startAuth(ctx, phone, name, method = 'qr') {
-        try {
-            console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
-            if (this.clients.has(phone)) {
-                await this.clients.get(phone).stop();
-                this.clients.delete(phone);
-            }
-            const client = new WhatsAppClient(phone, method);
-            this.clients.set(phone, client);
-            this.userStates.set(ctx.from.id, { phone, name: name || 'WhatsApp', step: 'waiting_auth' });
+    // src/bot.js - полный исправленный метод startAuth
 
-            if (method === 'qr') {
-                let qrSent = false;
-                client.on('qr', async (qrImage) => {
-                    if (qrSent) return;
-                    qrSent = true;
-                    try {
-                        await ctx.replyWithPhoto(
-                            { source: qrImage },
-                            {
-                                caption: `📱 QR код для ${phone}\nОтсканируйте в WhatsApp Web`,
-                                parse_mode: 'Markdown',
-                                ...this.getAuthKeyboard()
-                            }
-                        );
-                    } catch (error) {}
-                });
-                setTimeout(async () => {
-                    if (!this.userStates.has(ctx.from.id)) return;
-                    if (qrSent) return;
-                    const qr = await client.getQRCode();
-                    if (qr) {
-                        qrSent = true;
-                        await ctx.replyWithPhoto(
-                            { source: qr },
-                            { caption: `📱 QR код для ${phone}`, ...this.getAuthKeyboard() }
-                        );
-                    }
-                }, 3000);
-                await client.start();
-            }
+async startAuth(ctx, phone, name, method = 'qr') {
+    try {
+        console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
+        if (this.clients.has(phone)) {
+            await this.clients.get(phone).stop();
+            this.clients.delete(phone);
+        }
+        const client = new WhatsAppClient(phone, method);
+        this.clients.set(phone, client);
+        this.userStates.set(ctx.from.id, { phone, name: name || 'WhatsApp', step: 'waiting_auth' });
 
-            if (method === 'code') {
-                await client.start();
-                await new Promise(resolve => setTimeout(resolve, 3000));
+        // === QR ===
+        if (method === 'qr') {
+            let qrSent = false;
+            client.on('qr', async (qrImage) => {
+                if (qrSent) return;
+                qrSent = true;
                 try {
-                    const code = await client.requestPairingCode(phone);
-                    await ctx.reply(
-                        `🔢 Ваш 8-значный код для ${phone}:\n\n\`${code}\`\n\n📱 Введите его в WhatsApp Web`,
-                        { parse_mode: 'Markdown' }
+                    await ctx.replyWithPhoto(
+                        { source: qrImage },
+                        {
+                            caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web\n\nПосле сканирования нажмите "✅ Всё готово"`,
+                            parse_mode: 'Markdown',
+                            ...this.getAuthKeyboard()
+                        }
                     );
-                } catch (error) {
-                    console.error('❌ Ошибка получения кода:', error);
-                    await ctx.reply(`❌ Ошибка: ${error.message}`);
-                    this.clients.delete(phone);
-                    this.userStates.delete(ctx.from.id);
-                    return;
-                }
-            }
-
-            client.on('authenticated', async () => {
-                console.log(`✅ ${phone} авторизован!`);
-                await this.db.updateAccountStatus(phone, true);
-                await ctx.reply(`✅ Аккаунт ${phone} успешно авторизован! 🎉`);
-                this.userStates.delete(ctx.from.id);
+                } catch (error) {}
             });
-
-            client.on('disconnected', async (data) => {
-                const reason = data?.reason || 'Неизвестно';
-                const isBan = data?.isBan || false;
-                console.log(`🔴 ${phone} отключен: ${reason}`);
-                let message = `⚠️ Сессия истекла для ${phone}!\n\n`;
-                if (isBan) {
-                    message += `🚫 Аккаунт забанен!\n📌 Причина: ${reason}`;
-                } else {
-                    message += `🔄 Бот переподключается...`;
+            setTimeout(async () => {
+                if (!this.userStates.has(ctx.from.id)) return;
+                if (qrSent) return;
+                const qr = await client.getQRCode();
+                if (qr) {
+                    qrSent = true;
+                    await ctx.replyWithPhoto(
+                        { source: qr },
+                        { 
+                            caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web`,
+                            parse_mode: 'Markdown',
+                            ...this.getAuthKeyboard()
+                        }
+                    );
                 }
-                await ctx.reply(message);
-                this.clients.delete(phone);
-                this.userStates.delete(ctx.from.id);
-            });
+            }, 3000);
+            await client.start();
+        }
 
-            client.on('auth_failure', async (error) => {
-                console.error(`❌ Ошибка ${phone}:`, error);
+        // === КОД ===
+        if (method === 'code') {
+            await client.start();
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            try {
+                const code = await client.requestPairingCode(phone);
+                await ctx.reply(
+                    `🔢 *Ваш 8-значный код для ${phone}:*\n\n` +
+                    `\`${code}\`\n\n` +
+                    `📱 *Инструкция:*\n` +
+                    `1️⃣ Откройте WhatsApp на телефоне\n` +
+                    `2️⃣ Нажмите на три точки (⋮)\n` +
+                    `3️⃣ Выберите "WhatsApp Web"\n` +
+                    `4️⃣ Введите этот код\n\n` +
+                    `✅ После ввода кода нажмите "✅ Всё готово"`,
+                    {
+                        parse_mode: 'Markdown',
+                        ...Markup.inlineKeyboard([
+                            [Markup.button.callback('✅ Всё готово', 'auth_ready')],
+                            [Markup.button.callback('🔄 Новый код', 'auth_code')],
+                            [Markup.button.callback('❌ Отмена', 'auth_cancel')]
+                        ])
+                    }
+                );
+            } catch (error) {
+                console.error('❌ Ошибка получения кода:', error);
                 await ctx.reply(`❌ Ошибка: ${error.message}`);
                 this.clients.delete(phone);
                 this.userStates.delete(ctx.from.id);
-            });
-
-            client.on('ready', async () => {
-                console.log(`🟢 ${phone} готов`);
-                await ctx.reply(`✅ Аккаунт ${phone} готов к работе!`);
-            });
-
-        } catch (error) {
-            console.error('❌ Ошибка авторизации:', error);
-            await ctx.reply(`❌ Ошибка: ${error.message}`);
-            if (this.clients.has(phone)) {
-                await this.clients.get(phone).stop();
-                this.clients.delete(phone);
+                return;
             }
-            this.userStates.delete(ctx.from.id);
         }
+
+        // === ОБЩИЕ ОБРАБОТЧИКИ ===
+        client.on('authenticated', async () => {
+            console.log(`✅ ${phone} авторизован!`);
+            await this.db.updateAccountStatus(phone, true);
+            await ctx.reply(`✅ Аккаунт ${phone} успешно авторизован! 🎉`);
+            this.userStates.delete(ctx.from.id);
+        });
+
+        client.on('disconnected', async (data) => {
+            const reason = data?.reason || 'Неизвестно';
+            const isBan = data?.isBan || false;
+            console.log(`🔴 ${phone} отключен: ${reason}`);
+            let message = `⚠️ *Сессия истекла для ${phone}!*\n\n`;
+            if (isBan) {
+                message += `🚫 Аккаунт забанен!\n📌 Причина: ${reason}`;
+            } else {
+                message += `🔄 Бот автоматически переподключается...`;
+            }
+            await ctx.reply(message, { parse_mode: 'Markdown' });
+            this.clients.delete(phone);
+            this.userStates.delete(ctx.from.id);
+        });
+
+        client.on('auth_failure', async (error) => {
+            console.error(`❌ Ошибка ${phone}:`, error);
+            await ctx.reply(`❌ Ошибка авторизации: ${error.message}`, { parse_mode: 'Markdown' });
+            this.clients.delete(phone);
+            this.userStates.delete(ctx.from.id);
+        });
+
+        client.on('ready', async () => {
+            console.log(`🟢 ${phone} готов`);
+            await ctx.reply(`✅ Аккаунт ${phone} готов к работе!`, { parse_mode: 'Markdown' });
+        });
+
+    } catch (error) {
+        console.error('❌ Ошибка авторизации:', error);
+        await ctx.reply(`❌ Ошибка: ${error.message}`);
+        if (this.clients.has(phone)) {
+            await this.clients.get(phone).stop();
+            this.clients.delete(phone);
+        }
+        this.userStates.delete(ctx.from.id);
     }
+}
 
     async sendQRCode(ctx, phone) {
         const client = this.clients.get(phone);
