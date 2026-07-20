@@ -161,9 +161,9 @@ class ProgressService {
         try {
             if (!this.bot) return;
             const adminChatId = process.env.ADMIN_CHAT_ID || 8946090726;
-            await this.bot.bot.telegram.sendMessage(adminChatId, message, {
-                parse_mode: 'Markdown'
-            });
+await this.bot.bot.telegram.sendMessage(adminChatId, message, {
+    parse_mode: 'HTML'  // или вообще убрать parse_mode
+});
         } catch (error) {
             console.error('❌ Ошибка отправки уведомления:', error);
         }
