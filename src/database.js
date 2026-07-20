@@ -131,25 +131,27 @@ class Database {
     // ============================================
     // ПОЛУЧЕНИЕ АККАУНТОВ ПОЛЬЗОВАТЕЛЯ
     // ============================================
-    async getAccounts(userId = null) {
-        try {
-            const client = await this.pool.connect();
-            let query = 'SELECT * FROM accounts ORDER BY created_at DESC';
-            let params = [];
-            
-            if (userId) {
-                query = 'SELECT * FROM accounts WHERE user_id = $1 ORDER BY created_at DESC';
-                params = [userId];
-            }
-            
-            const result = await client.query(query, params);
-            client.release();
-            return result.rows;
-        } catch (error) {
-            console.error('❌ Ошибка получения аккаунтов:', error);
-            throw error;
+  async getAccounts(userId = null) {
+    try {
+        const client = await this.pool.connect();
+        let query = 'SELECT * FROM accounts ORDER BY created_at DESC';
+        let params = [];
+        
+        // Если userId НЕ передан - возвращаем ВСЕ аккаунты
+        // Если userId передан - только его аккаунты
+        if (userId) {
+            query = 'SELECT * FROM accounts WHERE user_id = $1 ORDER BY created_at DESC';
+            params = [userId];
         }
+        
+        const result = await client.query(query, params);
+        client.release();
+        return result.rows;
+    } catch (error) {
+        console.error('❌ Ошибка получения аккаунтов:', error);
+        throw error;
     }
+}
 
     // ============================================
     // ПОЛУЧЕНИЕ АККАУНТА ПО НОМЕРУ
