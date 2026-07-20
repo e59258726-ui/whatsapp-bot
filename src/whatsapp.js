@@ -261,11 +261,11 @@ class WhatsAppClient {
             });
 
             this.client.on('authenticated', async (session) => {
-                console.log(`✅ ${this.phone} аутентифицирован`);
-                this.isAuthenticated = true;
-                this.messageCount = 0;
-                await this.emit('authenticated', session);
-            });
+    console.log(`✅ ${this.phone} аутентифицирован`);
+    this.isAuthenticated = true;
+    // ❌ НЕ ЗАКРЫВАЙТЕ БРАУЗЕР!
+    // await this.closeBrowser(); // НЕ ДЕЛАЙТЕ ЭТО!
+});
 
             this.client.on('ready', async () => {
                 console.log(`🟢 ${this.phone} готов`);
