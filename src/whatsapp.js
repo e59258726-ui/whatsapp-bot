@@ -1,4 +1,4 @@
-// src/whatsapp.js - whatsapp-web.js версия
+// src/whatsapp.js - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -28,6 +28,7 @@ class WhatsAppClient {
 
         const executablePath = this.findBrowser();
 
+        // === ОПТИМИЗИРОВАННЫЕ НАСТРОЙКИ PUPPETEER ===
         this.client = new Client({
             authStrategy: new LocalAuth({
                 clientId: this.clientId,
@@ -35,7 +36,7 @@ class WhatsAppClient {
             }),
             puppeteer: {
                 executablePath: executablePath || undefined,
-                headless: true,
+                headless: 'new',
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -52,18 +53,28 @@ class WhatsAppClient {
                     '--disable-background-timer-throttling',
                     '--disable-backgrounding-occluded-windows',
                     '--disable-renderer-backgrounding',
+                    '--disable-back-forward-cache',
+                    '--disable-client-side-phishing-detection',
+                    '--disable-crash-reporter',
+                    '--disable-domain-reliability',
                     '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-web-security',
                     '--disable-features=BlockInsecurePrivateNetworkRequests',
-                    '--metrics-recording-only',
+                    '--disable-features=OutOfBlinkCors',
+                    '--disable-features=TranslateUI',
+                    '--max_old_space_size=128',
+                    '--js-flags="--max-old-space-size=128"',
+                    '--memory-pressure-off',
+                    '--max-web-workers=1',
+                    '--renderer-process-limit=1',
                     '--no-first-run',
+                    '--safebrowsing-disable-auto-update',
+                    '--metrics-recording-only',
                     '--hide-scrollbars',
-                    '--mute-audio',
-                    '--js-flags="--max-old-space-size=256"'
+                    '--mute-audio'
                 ],
                 defaultViewport: null,
                 ignoreHTTPSErrors: true,
-                timeout: 60000,
+                timeout: 30000,
                 dumpio: false,
                 handleSIGINT: false,
                 handleSIGTERM: false,
@@ -75,6 +86,8 @@ class WhatsAppClient {
         this.isAuthenticated = false;
         this.qrCode = null;
         this.browser = null;
+        this.messageCount = 0;
+        this.MAX_MESSAGES = 100;
         this.eventHandlers = {
             qr: [],
             code: [],
@@ -85,10 +98,15 @@ class WhatsAppClient {
             disconnected: []
         };
 
+        this.memoryMonitor = setInterval(() => {
+            const used = process.memoryUsage();
+            console.log(`📊 Память ${this.phone}: RSS=${Math.round(used.rss / 1024 / 1024)}MB, Heap=${Math.round(used.heapUsed / 1024 / 1024)}MB`);
+        }, 60000);
+
         this.memoryCleanupInterval = setInterval(() => {
             if (global.gc) {
                 global.gc();
-                console.log(`🧹 GC для ${this.phone}`);
+                console.log(`🧹 GC вызван для ${this.phone}`);
             }
         }, 60000);
     }
@@ -229,6 +247,7 @@ class WhatsAppClient {
             this.client.on('authenticated', async (session) => {
                 console.log(`✅ ${this.phone} аутентифицирован`);
                 this.isAuthenticated = true;
+                this.messageCount = 0;
                 await this.emit('authenticated', session);
             });
 
@@ -246,6 +265,15 @@ class WhatsAppClient {
 
             this.client.on('message', async (message) => {
                 console.log(`💬 Сообщение для ${this.phone}:`, message.body);
+                this.messageCount++;
+                
+                if (this.messageCount >= this.MAX_MESSAGES) {
+                    console.log(`🔄 Перезапуск клиента ${this.phone} для освобождения памяти...`);
+                    await this.closeBrowser();
+                    this.messageCount = 0;
+                    setTimeout(() => this.start(), 5000);
+                }
+                
                 await this.emit('message', message);
             });
 
@@ -286,6 +314,10 @@ class WhatsAppClient {
     async stop() {
         try {
             console.log(`⏹ Остановка ${this.phone}`);
+            if (this.memoryMonitor) {
+                clearInterval(this.memoryMonitor);
+                this.memoryMonitor = null;
+            }
             if (this.memoryCleanupInterval) {
                 clearInterval(this.memoryCleanupInterval);
                 this.memoryCleanupInterval = null;
