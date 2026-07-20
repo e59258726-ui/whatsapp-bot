@@ -166,21 +166,22 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ЗАПРОС 8-ЗНАЧНОГО КОДА
-    // ============================================
     async requestPairingCode(phoneNumber) {
         try {
             if (!this.client) {
                 throw new Error('Клиент не инициализирован');
             }
-            
             const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
             console.log(`🔢 Запрос кода для ${cleanNumber}`);
             
+            // Проверяем готовность
+            if (!this.client.pupBrowser) {
+                console.log('⏳ Ожидание инициализации браузера...');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+            
             const code = await this.client.requestPairingCode(cleanNumber);
             console.log(`✅ Код получен: ${code}`);
-            
             return code;
         } catch (error) {
             console.error(`❌ Ошибка запроса кода:`, error);
@@ -287,14 +288,12 @@ class WhatsAppClient {
             this.client.on('message', async (message) => {
                 console.log(`💬 Сообщение для ${this.phone}:`, message.body);
                 this.messageCount++;
-                
                 if (this.messageCount >= this.MAX_MESSAGES) {
                     console.log(`🔄 Перезапуск клиента ${this.phone} для освобождения памяти...`);
                     await this.closeBrowser();
                     this.messageCount = 0;
                     setTimeout(() => this.start(), 5000);
                 }
-                
                 await this.emit('message', message);
             });
 
