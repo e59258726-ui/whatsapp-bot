@@ -333,102 +333,101 @@ class TelegramBot {
         );
     }
 
-    // ============================================
-    // АВТОМАТИЧЕСКАЯ ПРОВЕРКА АККАУНТОВ
-    // ============================================
-    async autoCheckAccounts() {
-        try {
-            console.log('═══════════════════════════════════════');
-            console.log('🔍 АВТОПРОВЕРКА АККАУНТОВ');
-            console.log(`📅 ${new Date().toLocaleString()}`);
-            console.log('═══════════════════════════════════════');
+// src/bot.js - исправленный autoCheckAccounts
+
+async autoCheckAccounts() {
+    try {
+        // Пропускаем проверку, если идет фаза отдыха
+        if (this.service.isResting) {
+            console.log('⏸️ Пропускаем автопроверку (фаза отдыха)');
+            return;
+        }
+        
+        console.log('═══════════════════════════════════════');
+        console.log('🔍 АВТОПРОВЕРКА АККАУНТОВ');
+        console.log(`📅 ${new Date().toLocaleString()}`);
+        console.log('═══════════════════════════════════════');
+        
+        const allAccounts = await this.db.getAccounts();
+        if (allAccounts.length === 0) {
+            console.log('📭 Нет аккаунтов');
+            return;
+        }
+        
+        console.log(`📱 Всего аккаунтов: ${allAccounts.length}`);
+        let onlineCount = 0;
+        let offlineCount = 0;
+        
+        for (const account of allAccounts) {
+            const client = this.clients.get(account.phone);
+            let status = '❌ не проверен';
+            let isAuth = account.is_authenticated;
             
-            const allAccounts = await this.db.getAccounts();
-            if (allAccounts.length === 0) {
-                console.log('📭 Нет аккаунтов');
-                return;
-            }
-            
-            console.log(`📱 Всего аккаунтов: ${allAccounts.length}`);
-            let changes = [], onlineCount = 0, offlineCount = 0, autoFixed = 0;
-            
-            for (const account of allAccounts) {
-                const client = this.clients.get(account.phone);
-                let currentStatus = account.is_authenticated;
-                let newStatus = currentStatus;
-                let statusCheck = 'не проверен';
-                
-                if (client) {
-                    try {
-                        const isAuth = await Promise.race([
-                            client.getAuthStatus(),
-                            new Promise((resolve) => setTimeout(() => resolve(false), 10000))
-                        ]);
-                        newStatus = isAuth;
-                        statusCheck = isAuth ? '✅ активен' : '❌ не активен';
-                    } catch (error) {
-                        newStatus = false;
-                        statusCheck = `⚠️ ошибка`;
-                        const restored = await this.restoreClient(account.phone);
-                        if (restored) {
-                            newStatus = true;
-                            statusCheck = '✅ восстановлен';
-                            autoFixed++;
+            if (client) {
+                try {
+                    // Проверяем с коротким таймаутом
+                    const result = await Promise.race([
+                        client.getAuthStatus(),
+                        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+                    ]);
+                    
+                    if (result === null) {
+                        status = '⏳ таймаут (пропускаем)';
+                    } else {
+                        isAuth = result;
+                        status = isAuth ? '✅ активен' : '❌ не активен';
+                        // Обновляем статус только если точно знаем
+                        if (isAuth !== account.is_authenticated) {
+                            await this.db.updateAccountStatus(account.phone, isAuth);
                         }
                     }
-                } else {
-                    console.log(`🔧 Создание клиента для ${account.phone}...`);
+                } catch (error) {
+                    status = `⚠️ ошибка: ${error.message}`;
+                }
+            } else {
+                // Если клиента нет - не паникуем, просто создаем
+                status = '🔧 создаю клиента...';
+                try {
                     const restored = await this.restoreClient(account.phone);
-                    if (restored) {
-                        newStatus = true;
-                        statusCheck = '✅ создан';
-                        autoFixed++;
-                    } else {
-                        newStatus = false;
-                        statusCheck = '❌ не создан';
-                    }
+                    isAuth = restored;
+                    status = restored ? '✅ восстановлен' : '❌ не удалось';
+                } catch (error) {
+                    status = `❌ ошибка: ${error.message}`;
                 }
-                
-                if (newStatus) onlineCount++;
-                else offlineCount++;
-                
-                if (currentStatus !== newStatus) {
-                    console.log(`🔄 Изменение статуса ${account.phone}: ${currentStatus} → ${newStatus}`);
-                    await this.db.updateAccountStatus(account.phone, newStatus);
-                    changes.push({ phone: account.phone, oldStatus: currentStatus, newStatus: newStatus });
-                }
-                console.log(`  📱 ${account.phone}: ${statusCheck} (БД: ${currentStatus ? '✅' : '❌'})`);
             }
             
-            console.log('═══════════════════════════════════════');
-            console.log(`📊 ИТОГО: ${allAccounts.length} аккаунтов`);
-            console.log(`  🟢 В сети: ${onlineCount}`);
-            console.log(`  🔴 Не в сети: ${offlineCount}`);
-            console.log(`  🔄 Изменений: ${changes.length}`);
-            console.log(`  🔧 Автовосстановлено: ${autoFixed}`);
-            console.log('═══════════════════════════════════════');
+            if (isAuth) onlineCount++;
+            else offlineCount++;
             
-            if (changes.length > 0) {
-                await this.sendStatusChangesNotification(changes);
-            }
-            
-            if (autoFixed > 0) {
-                await this.sendNotification(
-                    `🔧 *Автовосстановление*\n\n✅ Восстановлено: ${autoFixed}`
-                );
-            }
-            
-            if (onlineCount === 0 && allAccounts.length > 0) {
-                await this.sendNotification(
-                    `⚠️ ВНИМАНИЕ!\n\nВсе аккаунты (${allAccounts.length}) вышли из системы!\n\n🔄 Требуется повторная авторизация.`
-                );
-            }
-            
-            console.log('✅ Автопроверка завершена');
-        } catch (error) {
-            console.error('❌ Ошибка автопроверки:', error);
+            console.log(`  📱 ${account.phone}: ${status}`);
         }
+        
+        console.log('═══════════════════════════════════════');
+        console.log(`📊 ИТОГО: ${allAccounts.length} аккаунтов`);
+        console.log(`  🟢 В сети: ${onlineCount}`);
+        console.log(`  🔴 Не в сети: ${offlineCount}`);
+        console.log('═══════════════════════════════════════');
+        
+        // Отправляем уведомление ТОЛЬКО если есть реальные изменения
+        // и не в фазе отдыха
+        if (onlineCount === 0 && allAccounts.length > 0 && !this.service.isResting) {
+            // Проверяем еще раз через 30 секунд перед отправкой
+            setTimeout(async () => {
+                const recheckAccounts = await this.db.getAccounts();
+                const recheckOnline = recheckAccounts.filter(a => a.is_authenticated).length;
+                if (recheckOnline === 0) {
+                    await this.sendNotification(
+                        `⚠️ ВНИМАНИЕ!\n\nВсе аккаунты (${allAccounts.length}) вышли из системы!\n\n🔄 Требуется повторная авторизация.`
+                    );
+                }
+            }, 30000);
+        }
+        
+        console.log('✅ Автопроверка завершена');
+    } catch (error) {
+        console.error('❌ Ошибка автопроверки:', error);
     }
+}
 
     async restoreClient(phone) {
         try {
