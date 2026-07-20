@@ -18,7 +18,7 @@ class WhatsAppClient {
 
         const sessionPath = path.join(sessionsDir, `session-${this.clientId}`);
         if (fs.existsSync(sessionPath)) {
-            console.log(`🔄 Удаляем старую сессию для ${this.phone}`);
+            console.log(`🔄 Удаляем старую сессию para ${this.phone}`);
             try {
                 fs.rmSync(sessionPath, { recursive: true, force: true });
             } catch (error) {
@@ -36,9 +36,8 @@ class WhatsAppClient {
             puppeteer: {
                 executablePath: executablePath || undefined,
                 headless: 'new',
-                // ===== УВЕЛИЧЕННЫЕ ТАЙМАУТЫ =====
-                protocolTimeout: 180000, // 3 минуты
-                timeout: 180000,
+                protocolTimeout: 300000,
+                timeout: 300000,
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -107,7 +106,7 @@ class WhatsAppClient {
         this.memoryCleanupInterval = setInterval(() => {
             if (global.gc) {
                 global.gc();
-                console.log(`🧹 GC вызван для ${this.phone}`);
+                console.log(`🧹 GC вызван para ${this.phone}`);
             }
         }, 60000);
     }
@@ -174,7 +173,7 @@ class WhatsAppClient {
                 throw new Error('Клиент не инициализирован');
             }
             const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-            console.log(`🔢 Запрос кода для ${cleanNumber}`);
+            console.log(`🔢 Запрос кода para ${cleanNumber}`);
             const code = await this.client.requestPairingCode(cleanNumber);
             console.log(`✅ Код получен: ${code}`);
             return code;
@@ -190,9 +189,9 @@ class WhatsAppClient {
                 throw new Error('Клиент не инициализирован');
             }
             const cleanCode = code.replace(/[-\s]/g, '').toUpperCase();
-            console.log(`🔢 Отправка кода ${cleanCode} для ${this.phone}`);
+            console.log(`🔢 Отправка кода ${cleanCode} para ${this.phone}`);
             await this.client.sendCode(cleanCode);
-            console.log(`✅ Код ${cleanCode} отправлен для ${this.phone}`);
+            console.log(`✅ Код ${cleanCode} отправлен para ${this.phone}`);
             return true;
         } catch (error) {
             console.error(`❌ Ошибка отправки кода ${this.phone}:`, error);
@@ -220,10 +219,10 @@ class WhatsAppClient {
                 this.browser = this.client.pupBrowser;
             }
             if (this.browser) {
-                console.log(`🔄 Закрытие браузера для ${this.phone}...`);
+                console.log(`🔄 Закрытие браузера para ${this.phone}...`);
                 await this.browser.close();
                 this.browser = null;
-                console.log(`✅ Браузер закрыт для ${this.phone}`);
+                console.log(`✅ Браузер закрыт para ${this.phone}`);
                 if (global.gc) global.gc();
             }
         } catch (error) {
@@ -306,7 +305,13 @@ class WhatsAppClient {
                 }
             });
 
-            await this.client.initialize();
+            await Promise.race([
+                this.client.initialize(),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error(`Таймаут инициализации ${this.phone} (5 минут)`)), 300000)
+                )
+            ]);
+            
             console.log(`✅ Клиент ${this.phone} инициализирован`);
 
             if (this.client.pupBrowser) {
