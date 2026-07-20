@@ -35,16 +35,24 @@ class Database {
         try {
             const client = await this.pool.connect();
 
+            // Таблица аккаунтов с user_id
             await client.query(`
                 CREATE TABLE IF NOT EXISTS accounts (
                     id SERIAL PRIMARY KEY,
                     phone VARCHAR(20) UNIQUE NOT NULL,
                     name VARCHAR(100) DEFAULT 'WhatsApp',
+                    user_id BIGINT NOT NULL,
                     is_authenticated BOOLEAN DEFAULT FALSE,
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
+            `);
+
+            // Индексы для быстрого поиска
+            await client.query(`
+                CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
+                CREATE INDEX IF NOT EXISTS idx_accounts_phone ON accounts(phone);
             `);
 
             await client.query(`
@@ -83,15 +91,36 @@ class Database {
         }
     }
 
-    async addAccount(phone, name = 'WhatsApp') {
+    // ============================================
+    // ДОБАВЛЕНИЕ АККАУНТА
+    // ============================================
+    async addAccount(phone, userId, name = 'WhatsApp') {
         try {
             const client = await this.pool.connect();
+            
+            // Проверяем, не принадлежит ли номер другому пользователю
+            const existing = await client.query(
+                'SELECT user_id FROM accounts WHERE phone = $1',
+                [phone]
+            );
+            
+            if (existing.rows.length > 0) {
+                const existingUserId = existing.rows[0].user_id;
+                if (existingUserId !== userId) {
+                    throw new Error(`Номер ${phone} уже используется другим пользователем`);
+                }
+            }
+            
             const result = await client.query(
-                'INSERT INTO accounts (phone, name) VALUES ($1, $2) ON CONFLICT (phone) DO UPDATE SET name = $2, updated_at = NOW() RETURNING *',
-                [phone, name]
+                `INSERT INTO accounts (phone, name, user_id) 
+                 VALUES ($1, $2, $3) 
+                 ON CONFLICT (phone) 
+                 DO UPDATE SET name = $2, user_id = $3, updated_at = NOW() 
+                 RETURNING *`,
+                [phone, name, userId]
             );
             client.release();
-            console.log(`✅ Аккаунт ${phone} добавлен/обновлен`);
+            console.log(`✅ Аккаунт ${phone} добавлен/обновлен для пользователя ${userId}`);
             return result.rows[0];
         } catch (error) {
             console.error('❌ Ошибка добавления аккаунта:', error);
@@ -99,10 +128,21 @@ class Database {
         }
     }
 
-    async getAccounts() {
+    // ============================================
+    // ПОЛУЧЕНИЕ АККАУНТОВ ПОЛЬЗОВАТЕЛЯ
+    // ============================================
+    async getAccounts(userId = null) {
         try {
             const client = await this.pool.connect();
-            const result = await client.query('SELECT * FROM accounts ORDER BY created_at DESC');
+            let query = 'SELECT * FROM accounts ORDER BY created_at DESC';
+            let params = [];
+            
+            if (userId) {
+                query = 'SELECT * FROM accounts WHERE user_id = $1 ORDER BY created_at DESC';
+                params = [userId];
+            }
+            
+            const result = await client.query(query, params);
             client.release();
             return result.rows;
         } catch (error) {
@@ -111,10 +151,21 @@ class Database {
         }
     }
 
-    async getAccount(phone) {
+    // ============================================
+    // ПОЛУЧЕНИЕ АККАУНТА ПО НОМЕРУ
+    // ============================================
+    async getAccount(phone, userId = null) {
         try {
             const client = await this.pool.connect();
-            const result = await client.query('SELECT * FROM accounts WHERE phone = $1', [phone]);
+            let query = 'SELECT * FROM accounts WHERE phone = $1';
+            let params = [phone];
+            
+            if (userId) {
+                query += ' AND user_id = $2';
+                params.push(userId);
+            }
+            
+            const result = await client.query(query, params);
             client.release();
             return result.rows[0] || null;
         } catch (error) {
@@ -123,13 +174,22 @@ class Database {
         }
     }
 
-    async updateAccountStatus(phone, isAuthenticated) {
+    // ============================================
+    // ОБНОВЛЕНИЕ СТАТУСА АККАУНТА
+    // ============================================
+    async updateAccountStatus(phone, isAuthenticated, userId = null) {
         try {
             const client = await this.pool.connect();
-            await client.query(
-                'UPDATE accounts SET is_authenticated = $1, updated_at = NOW() WHERE phone = $2',
-                [isAuthenticated, phone]
-            );
+            
+            let query = 'UPDATE accounts SET is_authenticated = $1, updated_at = NOW() WHERE phone = $2';
+            let params = [isAuthenticated, phone];
+            
+            if (userId) {
+                query += ' AND user_id = $3';
+                params.push(userId);
+            }
+            
+            await client.query(query, params);
             client.release();
             console.log(`✅ Статус аккаунта ${phone} обновлен: ${isAuthenticated}`);
         } catch (error) {
@@ -138,15 +198,38 @@ class Database {
         }
     }
 
-    async deleteAccount(phone) {
+    // ============================================
+    // УДАЛЕНИЕ АККАУНТА
+    // ============================================
+    async deleteAccount(phone, userId = null) {
         try {
             const client = await this.pool.connect();
-            await client.query(`
+            
+            // Сначала удаляем сообщения
+            let query = `
                 DELETE FROM messages 
                 WHERE from_account_id = (SELECT id FROM accounts WHERE phone = $1)
                    OR to_account_id = (SELECT id FROM accounts WHERE phone = $1)
-            `, [phone]);
-            await client.query('DELETE FROM accounts WHERE phone = $1', [phone]);
+            `;
+            let params = [phone];
+            
+            if (userId) {
+                query += ' AND user_id = $2';
+                params.push(userId);
+            }
+            
+            await client.query(query, params);
+            
+            // Затем удаляем аккаунт
+            query = 'DELETE FROM accounts WHERE phone = $1';
+            params = [phone];
+            
+            if (userId) {
+                query += ' AND user_id = $2';
+                params.push(userId);
+            }
+            
+            await client.query(query, params);
             client.release();
             console.log(`✅ Аккаунт ${phone} удален вместе с сообщениями`);
         } catch (error) {
@@ -155,6 +238,9 @@ class Database {
         }
     }
 
+    // ============================================
+    // СОХРАНЕНИЕ СООБЩЕНИЯ
+    // ============================================
     async saveMessage(fromAccountId, toAccountId, content, type = 'text') {
         try {
             const client = await this.pool.connect();
