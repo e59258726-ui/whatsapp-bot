@@ -28,10 +28,12 @@ class TelegramBot {
         this.setupActions();
         this.setupErrorHandler();
 
+        // Проверка аккаунтов каждые 5 минут
         setInterval(() => {
             this.checkAccounts();
         }, 5 * 60 * 1000);
 
+        // Мониторинг памяти
         setInterval(() => {
             const used = process.memoryUsage();
             console.log(`📊 Общая память: RSS=${Math.round(used.rss / 1024 / 1024)}MB, Heap=${Math.round(used.heapUsed / 1024 / 1024)}MB`);
@@ -56,6 +58,9 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // КЛАВИАТУРЫ
+    // ============================================
     getMainKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('📊 Статистика', 'main_stats')],
@@ -95,6 +100,9 @@ class TelegramBot {
         ]);
     }
 
+    // ============================================
+    // КОМАНДЫ
+    // ============================================
     setupCommands() {
         this.bot.use(async (ctx, next) => {
             console.log(`📨 [${new Date().toISOString()}] Сообщение:`, {
@@ -115,7 +123,8 @@ class TelegramBot {
             await ctx.reply(
                 '🤖 *WhatsApp Progress Bot*\n\n' +
                 '📱 Управляй прогревом аккаунтов WhatsApp!\n' +
-                '🗄️ Данные сохраняются в базе данных\n\n' +
+                '🗄️ Данные сохраняются в базе данных\n' +
+                '🔒 У каждого пользователя свои аккаунты\n\n' +
                 '📌 *Выберите действие в меню:*',
                 {
                     parse_mode: 'Markdown',
@@ -161,19 +170,30 @@ class TelegramBot {
             await this.showProgressStatus(ctx);
         });
 
+        // ===== НОВАЯ КОМАНДА ДЛЯ ПЕРЕЗАПУСКА КЛИЕНТОВ =====
+        this.bot.command('restart_clients', async (ctx) => {
+            console.log(`🔄 /restart_clients от ${ctx.from.id}`);
+            await this.restartClients(ctx);
+        });
+
         this.bot.command('help', async (ctx) => {
             console.log(`🆘 /help от ${ctx.from.id}`);
             await this.showHelp(ctx);
         });
     }
 
+    // ============================================
+    // МЕТОДЫ КОМАНД
+    // ============================================
     async startAddAccount(ctx) {
-        this.userStates.set(ctx.from.id, { step: 'waiting_phone', phone: null, name: null });
+        const userId = ctx.from.id;
+        this.userStates.set(userId, { step: 'waiting_phone', phone: null, name: null });
         await ctx.reply(
             '📱 *Добавление аккаунта*\n\n' +
             'Введите номер телефона в международном формате:\n' +
             'Пример: `+79637332642`\n\n' +
-            'Или нажмите кнопку "❌ Отмена"',
+            '⚠️ *Важно:* Этот номер будет привязан к вашему аккаунту.\n' +
+            'Другие пользователи не увидят ваш номер.',
             {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
@@ -211,6 +231,7 @@ class TelegramBot {
             '/accounts - Список аккаунтов\n' +
             '/check - Проверить аккаунты\n' +
             '/progress_status - Статус прогрева\n' +
+            '/restart_clients - Перезапустить клиентов\n' +
             '/start_progress - Запустить прогрев\n' +
             '/stop_progress - Остановить прогрев\n' +
             '/help - Помощь',
@@ -218,6 +239,69 @@ class TelegramBot {
         );
     }
 
+    // ============================================
+    // ПЕРЕЗАПУСК КЛИЕНТОВ
+    // ============================================
+    async restartClients(ctx) {
+        const userId = ctx.from.id;
+        await ctx.reply('🔄 Перезапускаю клиентов WhatsApp...');
+        
+        const accounts = await this.db.getAccounts(userId);
+        const authorized = accounts.filter(a => a.is_authenticated);
+        
+        if (authorized.length === 0) {
+            await ctx.reply('❌ У вас нет авторизованных аккаунтов для перезапуска');
+            return;
+        }
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const account of authorized) {
+            try {
+                // Закрываем старый клиент
+                if (this.clients.has(account.phone)) {
+                    await this.clients.get(account.phone).stop();
+                    this.clients.delete(account.phone);
+                }
+                
+                // Создаем новый клиент
+                const client = new WhatsAppClient(account.phone, 'qr');
+                this.clients.set(account.phone, client);
+                
+                client.on('ready', async () => {
+                    console.log(`🟢 ${account.phone} готов к работе`);
+                    await this.db.updateAccountStatus(account.phone, true);
+                });
+                
+                client.on('auth_failure', async (error) => {
+                    console.error(`❌ Ошибка ${account.phone}:`, error);
+                    await this.db.updateAccountStatus(account.phone, false);
+                });
+                
+                await client.start();
+                successCount++;
+                console.log(`✅ Клиент ${account.phone} запущен`);
+                
+            } catch (error) {
+                console.error(`❌ Ошибка запуска ${account.phone}:`, error);
+                failCount++;
+            }
+        }
+        
+        await ctx.reply(
+            `✅ *Перезапуск завершен!*\n\n` +
+            `🟢 Успешно: ${successCount}\n` +
+            `🔴 Ошибок: ${failCount}\n\n` +
+            `📱 Аккаунтов: ${authorized.length}\n` +
+            `🔄 Проверьте статус: /accounts`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+
+    // ============================================
+    // ОБРАБОТЧИКИ ТЕКСТА
+    // ============================================
     setupHandlers() {
         this.bot.on('text', async (ctx) => {
             const userId = ctx.from.id;
@@ -242,7 +326,24 @@ class TelegramBot {
                 const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
                 
                 try {
-                    await this.db.addAccount(normalizedPhone, 'WhatsApp');
+                    // Проверяем, не занят ли номер другим пользователем
+                    const existing = await this.db.getAccount(normalizedPhone);
+                    if (existing && existing.user_id !== userId) {
+                        await ctx.reply(
+                            `❌ Номер ${normalizedPhone} уже используется другим пользователем!\n\n` +
+                            `📌 Каждый номер может принадлежать только одному пользователю.`,
+                            {
+                                parse_mode: 'Markdown',
+                                ...Markup.inlineKeyboard([
+                                    [Markup.button.callback('🔙 Назад', 'main_add')]
+                                ])
+                            }
+                        );
+                        this.userStates.delete(userId);
+                        return;
+                    }
+                    
+                    await this.db.addAccount(normalizedPhone, userId, 'WhatsApp');
                     await ctx.reply(`✅ Аккаунт ${normalizedPhone} добавлен!`);
                     
                     await ctx.reply(
@@ -299,6 +400,9 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // INLINE КНОПКИ (ACTIONS)
+    // ============================================
     setupActions() {
         // Главное меню
         this.bot.action('main_stats', async (ctx) => {
@@ -388,112 +492,115 @@ class TelegramBot {
             await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'code');
         });
 
-  // src/bot.js - исправленный auth_ready
-
-// src/bot.js - исправленный auth_ready
-
-this.bot.action('auth_ready', async (ctx) => {
-    try {
-        // Отправляем новое сообщение вместо редактирования
-        await ctx.reply(
-            `⏳ *Ожидание подключения...*\n\n` +
-            `📱 Проверяю статус аккаунта...\n` +
-            `⏱️ Пожалуйста, подождите несколько секунд.`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        const userId = ctx.from.id;
-        const state = this.userStates.get(userId);
-        
-        if (!state || !state.phone) {
-            await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
-            return;
-        }
-        
-        const client = this.clients.get(state.phone);
-        if (!client) {
-            await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
-            this.userStates.delete(userId);
-            return;
-        }
-        
-        let isAuth = false;
-        let attempts = 0;
-        const maxAttempts = 10;
-        let lastMsg = null;
-        
-        while (attempts < maxAttempts) {
+        // === АВТОРИЗАЦИЯ: ВСЁ ГОТОВО ===
+        this.bot.action('auth_ready', async (ctx) => {
             try {
-                isAuth = await client.getAuthStatus();
-                if (isAuth) break;
-            } catch (error) {
-                console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
-            }
-            
-            attempts++;
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            // Обновляем сообщение о статусе (если есть)
-            if (attempts % 3 === 0) {
-                // Отправляем новое сообщение вместо редактирования
-                await ctx.reply(
+                const userId = ctx.from.id;
+                const state = this.userStates.get(userId);
+                
+                if (!state || !state.phone) {
+                    await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+                    return;
+                }
+                
+                const client = this.clients.get(state.phone);
+                if (!client) {
+                    await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
+                    this.userStates.delete(userId);
+                    return;
+                }
+                
+                // Отправляем сообщение о ожидании
+                let statusMsg = await ctx.reply(
                     `⏳ *Ожидание подключения...*\n\n` +
                     `📱 Проверяю статус аккаунта...\n` +
-                    `⏱️ Попытка ${attempts}/${maxAttempts}\n\n` +
-                    `💡 Убедитесь, что вы отсканировали QR-код в WhatsApp`,
+                    `⏱️ Пожалуйста, подождите...`,
                     { parse_mode: 'Markdown' }
                 );
-            }
-        }
-        
-        if (isAuth) {
-            await this.db.updateAccountStatus(state.phone, true);
-            
-            await ctx.reply(
-                `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
-                `⚙️ *Настройка прогрева:*\n` +
-                `1️⃣ Выберите время прогрева:\n` +
-                `   🟢 6 часов\n` +
-                `   🟢 12 часов\n` +
-                `   🟢 24 часа\n\n` +
-                `2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n` +
-                `📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
-                {
-                    parse_mode: 'Markdown',
-                    ...Markup.inlineKeyboard([
-                        [
-                            Markup.button.callback('🕐 6 часов', 'set_progress_6'),
-                            Markup.button.callback('🕐 12 часов', 'set_progress_12'),
-                            Markup.button.callback('🕐 24 часа', 'set_progress_24')
-                        ],
-                        [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
-                        [Markup.button.callback('📊 Статистика', 'main_stats')]
-                    ])
+                
+                let isAuth = false;
+                let attempts = 0;
+                const maxAttempts = 10;
+                
+                while (attempts < maxAttempts) {
+                    try {
+                        isAuth = await client.getAuthStatus();
+                        if (isAuth) break;
+                    } catch (error) {
+                        console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
+                    }
+                    
+                    attempts++;
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    
+                    if (attempts % 3 === 0) {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat.id,
+                            statusMsg.message_id,
+                            null,
+                            `⏳ *Ожидание подключения...*\n\n` +
+                            `📱 Проверяю статус аккаунта...\n` +
+                            `⏱️ Попытка ${attempts}/${maxAttempts}\n\n` +
+                            `💡 Убедитесь, что вы отсканировали QR-код`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
                 }
-            );
-            
-            this.userStates.delete(userId);
-            
-        } else {
-            await ctx.reply(
-                `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n` +
-                `⏱️ Время ожидания истекло.\n\n` +
-                `🔄 Попробуйте снова:\n` +
-                `1️⃣ Нажмите "➕ Добавить аккаунт"\n` +
-                `2️⃣ Введите номер ${state.phone}\n` +
-                `3️⃣ Отсканируйте QR-код\n` +
-                `4️⃣ Нажмите "✅ Всё готово"`,
-                { parse_mode: 'Markdown' }
-            );
-            
-            this.userStates.delete(userId);
-        }
-        
-    } catch (error) {
-        console.error('❌ Ошибка auth_ready:', error);
-        await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
-    }
-});
+                
+                if (isAuth) {
+                    await this.db.updateAccountStatus(state.phone, true);
+                    
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMsg.message_id,
+                        null,
+                        `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
+                        `⚙️ *Настройка прогрева:*\n` +
+                        `1️⃣ Выберите время прогрева:\n` +
+                        `   🟢 6 часов\n` +
+                        `   🟢 12 часов\n` +
+                        `   🟢 24 часа\n\n` +
+                        `2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n` +
+                        `📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
+                        {
+                            parse_mode: 'Markdown',
+                            ...Markup.inlineKeyboard([
+                                [
+                                    Markup.button.callback('🕐 6 часов', 'set_progress_6'),
+                                    Markup.button.callback('🕐 12 часов', 'set_progress_12'),
+                                    Markup.button.callback('🕐 24 часа', 'set_progress_24')
+                                ],
+                                [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
+                                [Markup.button.callback('📊 Статистика', 'main_stats')]
+                            ])
+                        }
+                    );
+                    
+                    this.userStates.delete(userId);
+                    
+                } else {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        statusMsg.message_id,
+                        null,
+                        `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n` +
+                        `⏱️ Время ожидания истекло.\n\n` +
+                        `🔄 Попробуйте снова:\n` +
+                        `1️⃣ Нажмите "➕ Добавить аккаунт"\n` +
+                        `2️⃣ Введите номер ${state.phone}\n` +
+                        `3️⃣ Отсканируйте QR-код\n` +
+                        `4️⃣ Нажмите "✅ Всё готово"`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    
+                    this.userStates.delete(userId);
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка auth_ready:', error);
+                await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
+            }
+        });
 
         // === НОВЫЕ ACTION ДЛЯ ВРЕМЕНИ ПРОГРЕВА ===
         this.bot.action('set_progress_6', async (ctx) => {
@@ -563,13 +670,23 @@ this.bot.action('auth_ready', async (ctx) => {
         // === УДАЛЕНИЕ АККАУНТА ===
         this.bot.action(/delete_(.+)/, async (ctx) => {
             const phone = ctx.match[1];
+            const userId = ctx.from.id;
+            
             await ctx.answerCbQuery('🗑️ Удаление...');
             try {
-                await this.db.deleteAccount(phone);
+                const account = await this.db.getAccount(phone, userId);
+                if (!account) {
+                    await ctx.reply('❌ Аккаунт не найден или не принадлежит вам');
+                    return;
+                }
+                
+                await this.db.deleteAccount(phone, userId);
+                
                 if (this.clients.has(phone)) {
                     await this.clients.get(phone).stop();
                     this.clients.delete(phone);
                 }
+                
                 await ctx.reply(`✅ Аккаунт ${phone} удален!`);
                 await this.showAccounts(ctx);
             } catch (error) {
@@ -592,24 +709,32 @@ this.bot.action('auth_ready', async (ctx) => {
         });
     }
 
+    // ============================================
+    // ОТОБРАЖЕНИЕ ДАННЫХ
+    // ============================================
     async showAccounts(ctx) {
         try {
-            const accounts = await this.db.getAccounts();
+            const userId = ctx.from.id;
+            const accounts = await this.db.getAccounts(userId);
+            
             if (accounts.length === 0) {
-                await ctx.reply('📭 Нет аккаунтов');
+                await ctx.reply('📭 У вас нет аккаунтов');
                 return;
             }
+            
             const buttons = [];
             for (const acc of accounts) {
                 const status = acc.is_authenticated ? '🟢' : '🔴';
                 buttons.push([Markup.button.callback(`${status} ${acc.phone}`, `delete_${acc.phone}`)]);
             }
             buttons.push([Markup.button.callback('🔙 Назад', 'back_main')]);
+            
             await ctx.reply(
-                '📋 *Список аккаунтов*\n\n' +
+                '📋 *Ваши аккаунты*\n\n' +
                 '🟢 - авторизован\n' +
                 '🔴 - не авторизован\n\n' +
-                '👆 *Нажмите на номер чтобы удалить*',
+                '👆 *Нажмите на номер чтобы удалить*\n\n' +
+                `📌 Всего аккаунтов: ${accounts.length}`,
                 {
                     parse_mode: 'Markdown',
                     ...Markup.inlineKeyboard(buttons)
@@ -624,7 +749,8 @@ this.bot.action('auth_ready', async (ctx) => {
     async showStats(ctx) {
         try {
             const stats = await this.db.getStats();
-            const accounts = await this.db.getAccounts();
+            const userId = ctx.from.id;
+            const accounts = await this.db.getAccounts(userId);
             const progressStats = await this.service.getStats();
             
             const status = this.service.isRunning ? '🟢 Активен' : '🔴 Остановлен';
@@ -633,8 +759,8 @@ this.bot.action('auth_ready', async (ctx) => {
             await ctx.reply(
                 `📊 *Статистика*\n\n` +
                 `🟢 Статус прогрева: ${progressStatus}\n` +
-                `📱 Аккаунтов: ${stats.total_accounts || 0}\n` +
-                `🟢 Авторизовано: ${stats.authenticated_accounts || 0}\n` +
+                `📱 Ваших аккаунтов: ${accounts.length}\n` +
+                `🟢 Авторизовано: ${accounts.filter(a => a.is_authenticated).length}\n` +
                 `💬 Отправлено: ${stats.total_messages || 0}\n` +
                 `⏱️ Время прогрева: ${Math.round(progressStats.durationHours * 60) || 0} минут\n` +
                 `📨 Сообщений за сессию: ${progressStats.messagesSent || 0}`,
@@ -674,6 +800,9 @@ this.bot.action('auth_ready', async (ctx) => {
         }
     }
 
+    // ============================================
+    // ПРОВЕРКА АККАУНТОВ
+    // ============================================
     async checkAccounts() {
         try {
             console.log('🔍 Проверка состояния аккаунтов...');
@@ -760,6 +889,9 @@ this.bot.action('auth_ready', async (ctx) => {
         }
     }
 
+    // ============================================
+    // АВТОРИЗАЦИЯ WHATSAPP
+    // ============================================
     async startAuth(ctx, phone, name, method = 'qr') {
         try {
             console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
@@ -891,7 +1023,7 @@ this.bot.action('auth_ready', async (ctx) => {
                 console.error(`❌ Ошибка ${phone}:`, error);
                 
                 await ctx.reply(
-                    `❌ *Ошибка авторизации для ${phone}!*\n\n` +
+                    `❌ *Ошибка авторизации para ${phone}!*\n\n` +
                     `🔄 Бот автоматически переподключается...\n` +
                     `⏳ Пожалуйста, подождите 5-10 секунд.\n\n` +
                     `📌 Ошибка: ${error.message || error}`,
@@ -942,11 +1074,51 @@ this.bot.action('auth_ready', async (ctx) => {
         }
     }
 
+    // ============================================
+    // ЗАПУСК И ОСТАНОВКА
+    // ============================================
     async start() {
         try {
             console.log('🚀 Запуск бота...');
             await this.db.connect();
             console.log('✅ База данных подключена');
+            
+            // ===== АВТОМАТИЧЕСКИЙ ЗАПУСК КЛИЕНТОВ =====
+            console.log('🔄 Запуск клиентов для авторизованных аккаунтов...');
+            const accounts = await this.db.getAccounts();
+            const authorized = accounts.filter(a => a.is_authenticated);
+            
+            if (authorized.length > 0) {
+                console.log(`📱 Найдено ${authorized.length} авторизованных аккаунтов`);
+                
+                for (const account of authorized) {
+                    try {
+                        if (!this.clients.has(account.phone)) {
+                            const client = new WhatsAppClient(account.phone, 'qr');
+                            this.clients.set(account.phone, client);
+                            
+                            client.on('ready', async () => {
+                                console.log(`🟢 ${account.phone} готов к работе`);
+                                await this.db.updateAccountStatus(account.phone, true);
+                            });
+                            
+                            client.on('auth_failure', async (error) => {
+                                console.error(`❌ Ошибка ${account.phone}:`, error);
+                                await this.db.updateAccountStatus(account.phone, false);
+                            });
+                            
+                            await client.start();
+                            console.log(`✅ Клиент ${account.phone} запущен`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Ошибка запуска ${account.phone}:`, error);
+                    }
+                }
+            } else {
+                console.log('📭 Нет авторизованных аккаунтов');
+            }
+            
+            // Запускаем бота
             await this.bot.launch();
             this.isRunning = true;
             console.log('🚀 Бот запущен!');
