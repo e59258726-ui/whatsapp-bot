@@ -1,7 +1,6 @@
 node_modules/
 sessions/
 logs/
-auth_info_baileys/
 .env
 *.log
 .DS_Store
