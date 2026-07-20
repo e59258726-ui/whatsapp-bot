@@ -1,6 +1,7 @@
 // src/service.js
 const GeminiAI = require('./gemini');
 const config = require('./config');
+const WhatsAppClient = require('./whatsapp');
 
 class ProgressService {
     constructor(db) {
@@ -148,6 +149,37 @@ class ProgressService {
         const activeDuration = this.cycleActiveTime;
         let messageCount = 0;
 
+        // ===== ПОЛУЧАЕМ НАСТРОЙКИ СКОРОСТИ =====
+        const speed = config.SEND_SPEED || 'medium';
+        let minDelay, maxDelay;
+        
+        switch (speed) {
+            case 'slow':
+                minDelay = 120000; // 2 минуты
+                maxDelay = 300000; // 5 минут
+                console.log(`🐢 Медленная скорость: задержка 2-5 минут`);
+                break;
+            case 'medium':
+                minDelay = 60000;  // 1 минута
+                maxDelay = 180000; // 3 минуты
+                console.log(`🚶 Средняя скорость: задержка 1-3 минуты`);
+                break;
+            case 'fast':
+                minDelay = 30000;  // 30 секунд
+                maxDelay = 60000;  // 1 минута
+                console.log(`🏃 Быстрая скорость: задержка 30-60 секунд`);
+                break;
+            case 'human':
+                minDelay = 60000;  // 1 минута
+                maxDelay = 300000; // 5 минут (случайно)
+                console.log(`👤 Режим "Как человек": задержка 1-5 минут`);
+                break;
+            default:
+                minDelay = 60000;
+                maxDelay = 180000;
+                console.log(`🚶 Скорость по умолчанию: задержка 1-3 минуты`);
+        }
+
         console.log(`📨 Найдено ${authorized.length} аккаунтов`);
 
         const shuffled = authorized.sort(() => Math.random() - 0.5);
@@ -178,7 +210,9 @@ class ProgressService {
                 
                 console.log(`💬 [${messageType}] ${fromAccount.phone} → ${toAccount.phone}: ${message.substring(0, 50)}...`);
                 
-                const delay = Math.floor(Math.random() * 10000) + 5000;
+                // Случайная задержка в заданном диапазоне
+                const delay = Math.floor(Math.random() * (maxDelay - minDelay)) + minDelay;
+                console.log(`⏳ Следующее сообщение через ${Math.round(delay/1000)} секунд`);
                 await this.sleep(delay);
                 
                 index++;
@@ -332,7 +366,17 @@ class ProgressService {
             '❤️ Отличный день!',
             '🔥 Классно!',
             '✨ Невероятно!',
-            '🎉 Супер!'
+            '🎉 Супер!',
+            '👋 Приветик!',
+            '💪 Все отлично!',
+            '🌈 Как настроение?',
+            '🌟 Ты как?',
+            '💫 Чем занимаешься?',
+            '🌸 Отличная погода!',
+            '🌺 Как жизнь?',
+            '🎶 Что нового?',
+            '💖 Улыбнись!',
+            '✨ Хорошего дня!'
         ];
         return messages[Math.floor(Math.random() * messages.length)];
     }
@@ -351,10 +395,53 @@ class ProgressService {
                 return;
             }
             
-            const fromClient = this.clientsMap.get(fromAccount.phone);
+            let fromClient = this.clientsMap.get(fromAccount.phone);
+            
+            // Автоматическое создание клиента
+            if (!fromClient) {
+                console.log(`🔧 Создаю клиента для ${fromAccount.phone}...`);
+                try {
+                    const newClient = new WhatsAppClient(fromAccount.phone, 'qr');
+                    this.clientsMap.set(fromAccount.phone, newClient);
+                    
+                    await new Promise((resolve) => {
+                        let resolved = false;
+                        const timeout = setTimeout(() => {
+                            if (!resolved) resolve();
+                        }, 15000);
+                        
+                        newClient.on('ready', () => {
+                            if (resolved) return;
+                            resolved = true;
+                            clearTimeout(timeout);
+                            console.log(`🟢 ${fromAccount.phone} готов`);
+                            resolve();
+                        });
+                        
+                        newClient.on('auth_failure', (error) => {
+                            if (resolved) return;
+                            resolved = true;
+                            clearTimeout(timeout);
+                            console.error(`❌ Ошибка ${fromAccount.phone}:`, error);
+                            resolve();
+                        });
+                        
+                        newClient.start().catch(() => {
+                            if (resolved) return;
+                            resolved = true;
+                            clearTimeout(timeout);
+                            resolve();
+                        });
+                    });
+                    
+                    fromClient = this.clientsMap.get(fromAccount.phone);
+                } catch (error) {
+                    console.error(`❌ Ошибка создания клиента:`, error);
+                }
+            }
             
             if (!fromClient) {
-                console.log(`❌ Клиент не найден для ${fromAccount.phone}`);
+                console.log(`❌ Клиент не найден para ${fromAccount.phone}`);
                 await this.db.updateAccountStatus(fromAccount.phone, false);
                 return;
             }
@@ -363,7 +450,7 @@ class ProgressService {
                 if (fromClient.client && fromClient.client.pupBrowser) {
                     const isConnected = await fromClient.client.pupBrowser.isConnected();
                     if (!isConnected) {
-                        console.log(`❌ Браузер закрыт для ${fromAccount.phone}`);
+                        console.log(`❌ Браузер закрыт para ${fromAccount.phone}`);
                         await this.db.updateAccountStatus(fromAccount.phone, false);
                         return;
                     }
