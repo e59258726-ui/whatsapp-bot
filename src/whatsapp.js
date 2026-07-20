@@ -1,4 +1,4 @@
-// src/whatsapp.js - Baileys версия
+// src/whatsapp.js - БЕЗ PINO
 const makeWASocket = require('baileys').default;
 const {
     useMultiFileAuthState,
@@ -9,7 +9,6 @@ const {
 const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
-const pino = require('pino');
 const config = require('./config');
 
 class WhatsAppClient {
@@ -41,9 +40,6 @@ class WhatsAppClient {
         };
     }
 
-    // ============================================
-    // ОБРАБОТЧИКИ СОБЫТИЙ
-    // ============================================
     on(event, handler) {
         if (this.eventHandlers[event]) {
             this.eventHandlers[event].push(handler);
@@ -62,9 +58,6 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ГЕНЕРАЦИЯ QR КОДА
-    // ============================================
     async generateQRCode(qrData) {
         try {
             return await qrcode.toBuffer(qrData, {
@@ -79,9 +72,6 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ПОЛУЧИТЬ QR КОД
-    // ============================================
     async getQRCode() {
         if (this.qrCode) {
             return await this.generateQRCode(this.qrCode);
@@ -89,9 +79,6 @@ class WhatsAppClient {
         return null;
     }
 
-    // ============================================
-    // ОТПРАВКА КОДА
-    // ============================================
     async sendCode(code) {
         try {
             if (!this.socket) {
@@ -105,24 +92,22 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ЗАПУСК КЛИЕНТА
-    // ============================================
     async start() {
         try {
             console.log(`🚀 Запуск Baileys клиента для ${this.phone}`);
 
-            const logger = pino({
-                level: 'warn',
-                transport: {
-                    target: 'pino-pretty',
-                    options: {
-                        colorize: true,
-                        translateTime: 'SYS:standard',
-                        ignore: 'pid,hostname'
-                    }
-                }
-            });
+            // Простой логгер без pino
+            const logger = {
+                log: (msg) => console.log(`📊 [Baileys] ${msg}`),
+                info: (msg) => console.log(`ℹ️ [Baileys] ${msg}`),
+                warn: (msg) => console.log(`⚠️ [Baileys] ${msg}`),
+                error: (msg) => console.log(`❌ [Baileys] ${msg}`),
+                trace: (msg) => console.log(`🔍 [Baileys] ${msg}`),
+                debug: (msg) => console.log(`🐛 [Baileys] ${msg}`),
+                fatal: (msg) => console.log(`💀 [Baileys] ${msg}`),
+                child: () => logger,
+                level: 'warn'
+            };
 
             const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
@@ -138,28 +123,7 @@ class WhatsAppClient {
                 keepAliveIntervalMs: 10000,
                 generateHighQualityLinkPreview: false,
                 syncFullHistory: false,
-                markOnlineOnConnect: false,
-                patchMessageBeforeSending: (message) => {
-                    const requiresPatch = !!(
-                        message.buttonsMessage ||
-                        message.templateMessage ||
-                        message.listMessage
-                    );
-                    if (requiresPatch) {
-                        message = {
-                            viewOnceMessage: {
-                                message: {
-                                    messageContextInfo: {
-                                        deviceListMetadataVersion: 2,
-                                        deviceListMetadata: {}
-                                    },
-                                    ...message
-                                }
-                            }
-                        };
-                    }
-                    return message;
-                }
+                markOnlineOnConnect: false
             });
 
             this.socket.ev.on('creds.update', saveCreds);
@@ -193,7 +157,7 @@ class WhatsAppClient {
 
                     if (shouldReconnect) {
                         console.log(`🔄 Переподключение ${this.phone}...`);
-                        await this.start();
+                        setTimeout(() => this.start(), 5000);
                     } else {
                         console.log(`❌ ${this.phone} разлогинен`);
                         this.isAuthenticated = false;
@@ -234,9 +198,6 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ОСТАНОВКА КЛИЕНТА
-    // ============================================
     async stop() {
         try {
             console.log(`⏹ Остановка ${this.phone}`);
@@ -250,9 +211,6 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ОТПРАВКА СООБЩЕНИЯ
-    // ============================================
     async sendMessage(to, text) {
         try {
             if (!this.isAuthenticated || !this.socket) {
@@ -269,16 +227,10 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ПОЛУЧИТЬ СТАТУС
-    // ============================================
     async getAuthStatus() {
         return this.isAuthenticated;
     }
 
-    // ============================================
-    // ПОЛУЧИТЬ СОСТОЯНИЕ
-    // ============================================
     async getState() {
         try {
             if (this.socket) {
@@ -290,9 +242,6 @@ class WhatsAppClient {
         }
     }
 
-    // ============================================
-    // ПОЛУЧИТЬ ИНФОРМАЦИЮ
-    // ============================================
     async getInfo() {
         try {
             if (this.socket && this.isAuthenticated) {
