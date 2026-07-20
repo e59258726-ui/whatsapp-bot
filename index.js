@@ -21,14 +21,8 @@ app.listen(PORT, () => console.log(`🌐 HTTP сервер на порту ${POR
 const TOKEN = process.env.BOT_TOKEN;
 const ADMIN = process.env.ADMIN_CHAT_ID;
 
-// Проверка токена
-if (!TOKEN) {
-    console.error('❌ BOT_TOKEN не установлен!');
-    process.exit(1);
-}
-
-if (!ADMIN) {
-    console.error('❌ ADMIN_CHAT_ID не установлен!');
+if (!TOKEN || !ADMIN) {
+    console.error('❌ Ошибка: BOT_TOKEN или ADMIN_CHAT_ID не установлены');
     process.exit(1);
 }
 
@@ -37,11 +31,7 @@ const bot = new TelegramBot(TOKEN, {
     parse_mode: null
 });
 
-// Логирование ошибок Telegram
-bot.on('error', (error) => {
-    console.error('❌ Ошибка Telegram:', error.message);
-});
-
+bot.on('error', (error) => console.error('❌ Ошибка Telegram:', error.message));
 bot.on('polling_error', (error) => {
     console.error('❌ Ошибка polling:', error.message);
     if (error.message && error.message.includes('409')) {
@@ -54,7 +44,7 @@ bot.on('polling_error', (error) => {
 });
 
 // ============================================
-// 3. WHATSAPP КЛИЕНТ (BAILEYS)
+// 3. WHATSAPP КЛИЕНТ (С ПРИНУДИТЕЛЬНЫМ ПАРНЫМ КОДОМ)
 // ============================================
 let whatsapp = null;
 let isConnecting = false;
@@ -75,13 +65,21 @@ async function startWhatsApp(phoneNumber) {
 
         const { state, saveCreds } = await useMultiFileAuthState('sessions');
         
+        // ОЧИЩАЕМ СТАРУЮ СЕССИЮ если есть
+        const fs = require('fs');
+        const sessionPath = 'sessions';
+        if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            console.log('🗑 Старая сессия удалена');
+        }
+        
         const sock = makeWASocket({
             auth: state,
             browser: Browsers.macOS('Chrome'),
             phone: phoneNumber.replace('+', ''),
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 10000,
-            // Включаем парный код
+            // ПРИНУДИТЕЛЬНО включаем парный код
             getPairingCode: async (phone) => {
                 console.log(`📱 Запрос парного кода для ${phone}`);
                 return true;
@@ -103,15 +101,14 @@ async function startWhatsApp(phoneNumber) {
                     await bot.sendPhoto(ADMIN, qrImage, {
                         caption: `📱 Отсканируйте QR для ${phoneNumber}`
                     });
-                    await bot.sendMessage(ADMIN, `📱 Текст QR:\n${qr}`);
                 } catch (error) {
                     console.error('Ошибка отправки QR:', error);
                 }
             }
 
-            // ПАРНЫЙ КОД (ОСНОВНОЙ СПОСОБ!)
+            // ПАРНЫЙ КОД - ГЛАВНЫЙ СПОСОБ!
             if (pairingCode) {
-                console.log(`🔑 Парный код для ${phoneNumber}: ${pairingCode}`);
+                console.log(`🔑 ПАРНЫЙ КОД: ${pairingCode}`);
                 await bot.sendMessage(ADMIN, 
 `🔑 ПАРНЫЙ КОД ДЛЯ ${phoneNumber}
 
@@ -124,7 +121,8 @@ async function startWhatsApp(phoneNumber) {
 4. Введите номер: ${phoneNumber}
 5. Введите код: ${pairingCode}
 
-Это работает даже если QR не отображается!`
+⚡ ЭТО ГЛАВНЫЙ СПОСОБ!
+Если не работает - попробуйте QR код`
                 );
             }
 
@@ -208,9 +206,6 @@ ${text}`
         // --- ОШИБКИ ---
         whatsapp.ev.on('error', (error) => {
             console.error('❌ Ошибка WhatsApp:', error.message);
-            if (error.message && error.message.includes('404')) {
-                bot.sendMessage(ADMIN, `⚠️ Ошибка 404 для ${phoneNumber}\nПопробуйте позже или используйте парный код.`);
-            }
         });
 
     } catch (error) {
@@ -224,7 +219,6 @@ ${text}`
 // 4. КОМАНДЫ TELEGRAM
 // ============================================
 
-// /start
 bot.onText(/\/start/, async (msg) => {
     console.log(`📩 Команда /start от ${msg.from.id}`);
     await bot.sendMessage(msg.chat.id, 
@@ -234,6 +228,7 @@ bot.onText(/\/start/, async (msg) => {
 /add_account - Добавить аккаунт
 /status - Статус
 /help - Помощь
+/clear - Очистить сессию
 
 БЕСПЛАТНО!
 - Без браузера
@@ -242,13 +237,11 @@ bot.onText(/\/start/, async (msg) => {
     );
 });
 
-// /add_account
 bot.onText(/\/add_account/, async (msg) => {
     console.log(`📩 Команда /add_account от ${msg.from.id}`);
     await bot.sendMessage(msg.chat.id, '📱 Введите номер телефона:\nПример: +79637332642');
 });
 
-// /status
 bot.onText(/\/status/, async (msg) => {
     console.log(`📩 Команда /status от ${msg.from.id}`);
     const used = process.memoryUsage();
@@ -264,7 +257,6 @@ WhatsApp: ${whatsapp ? '✅' : '❌'}
     );
 });
 
-// /help
 bot.onText(/\/help/, async (msg) => {
     console.log(`📩 Команда /help от ${msg.from.id}`);
     await bot.sendMessage(msg.chat.id, 
@@ -281,6 +273,18 @@ bot.onText(/\/help/, async (msg) => {
     );
 });
 
+bot.onText(/\/clear/, async (msg) => {
+    console.log(`📩 Команда /clear от ${msg.from.id}`);
+    const fs = require('fs');
+    const sessionPath = 'sessions';
+    if (fs.existsSync(sessionPath)) {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        await bot.sendMessage(msg.chat.id, '🗑 Сессия очищена! Отправьте /add_account для нового подключения.');
+    } else {
+        await bot.sendMessage(msg.chat.id, '📭 Сессия не найдена');
+    }
+});
+
 // --- ОБРАБОТКА НОМЕРА ТЕЛЕФОНА ---
 bot.on('message', async (msg) => {
     const text = msg.text;
@@ -288,7 +292,6 @@ bot.on('message', async (msg) => {
     
     console.log(`📨 Сообщение от ${msg.from.id}: ${text}`);
     
-    // Проверяем что это номер телефона (11-15 цифр, может начинаться с +)
     if (text.match(/^\+?\d{11,15}$/)) {
         const phone = text.startsWith('+') ? text : `+${text}`;
         await bot.sendMessage(msg.chat.id, `🔄 Подключаю ${phone}...`);
@@ -303,10 +306,7 @@ setInterval(() => {
     const used = process.memoryUsage();
     const rss = Math.round(used.rss / 1024 / 1024);
     console.log(`📊 Память: ${rss} MB`);
-    
-    if (rss > 400) {
-        console.warn(`⚠️ Критическая память: ${rss} MB!`);
-    }
+    if (rss > 400) console.warn(`⚠️ Критическая память: ${rss} MB!`);
 }, 60000);
 
 // ============================================
@@ -314,16 +314,14 @@ setInterval(() => {
 // ============================================
 console.log('═'.repeat(50));
 console.log('🚀 WhatsApp Bot (Baileys) ЗАПУЩЕН!');
-console.log(`📱 BOT_TOKEN: ${TOKEN.substring(0, 15)}...`);
-console.log(`👤 ADMIN_CHAT_ID: ${ADMIN}`);
 console.log('📱 Отправьте /add_account в Telegram');
 console.log('💡 Используйте ПАРНЫЙ КОД (8 цифр)');
 console.log('═'.repeat(50));
 
-// Отправляем приветствие админу
 bot.sendMessage(ADMIN, 
 `🚀 WhatsApp Bot (Baileys) ЗАПУЩЕН!
 
 📌 /add_account - Добавить аккаунт
-💡 Используйте ПАРНЫЙ КОД вместо QR!`
-).catch(err => console.error('❌ Ошибка отправки приветствия:', err.message));
+💡 Используйте ПАРНЫЙ КОД вместо QR!
+🔄 /clear - Очистить сессию если проблемы`
+).catch(err => console.error('❌ Ошибка:', err.message));
