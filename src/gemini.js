@@ -5,12 +5,16 @@ const config = require('./config');
 class GeminiAI {
     constructor() {
         this.genAI = config.GEMINI_API_KEY ? new GoogleGenerativeAI(config.GEMINI_API_KEY) : null;
-        this.model = this.genAI ? this.genAI.getGenerativeModel({ model: 'gemini-pro' }) : null;
+        this.model = this.genAI ? this.genAI.getGenerativeModel({ 
+            model: config.GEMINI_MODEL || 'gemini-pro'
+        }) : null;
         console.log(`✅ Gemini AI ${this.genAI ? 'инициализирован' : 'недоступен'}`);
+        console.log(`📦 Модель: ${config.GEMINI_MODEL || 'gemini-pro'}`);
     }
 
     async generateMessage(prompt) {
         if (!this.model) {
+            console.log('⚠️ Gemini не доступен, использую fallback');
             return this.getFallbackMessage();
         }
 
@@ -19,7 +23,7 @@ class GeminiAI {
             const response = await result.response;
             return response.text();
         } catch (error) {
-            console.error('❌ Ошибка генерации сообщения:', error);
+            console.error('❌ Ошибка генерации:', error);
             return this.getFallbackMessage();
         }
     }
@@ -45,6 +49,49 @@ class GeminiAI {
         Диалог должен быть дружеским, неформальным, на русском языке.
         Ответ должен быть в формате: "Имя: сообщение"
         Напиши только ответ второго человека.`;
+
+        const result = await this.generateMessage(prompt);
+        return result;
+    }
+
+    // ============================================
+    // НОВЫЕ МЕТОДЫ ДЛЯ РАЗНЫХ ТИПОВ СООБЩЕНИЙ
+    // ============================================
+    async generateTextMessage(account1, account2) {
+        const prompt = `Напиши дружеское сообщение от ${account1} к ${account2}. 
+        Сообщение должно быть:
+        - Естественным и неформальным
+        - На русском языке
+        - Содержать вопрос или интересную тему
+        - Длина: 1-2 предложения
+        Напиши только текст сообщения.`;
+
+        return await this.generateMessage(prompt);
+    }
+
+    async generateSmileMessage(account1, account2) {
+        const prompt = `Напиши сообщение от ${account1} к ${account2} используя только смайлики. 
+        Сообщение должно выражать эмоции (радость, удивление, любовь, смех).
+        Используй 3-5 смайликов.`;
+
+        const result = await this.generateMessage(prompt);
+        return result || '😊😍❤️✨🎉';
+    }
+
+    async generateVoiceMessage(account1, account2) {
+        const prompt = `Напиши голосовое сообщение от ${account1} к ${account2}.
+        Сообщение должно быть разговорным, как в голосовом чате.
+        Длина: 1-2 предложения.
+        Напиши только текст голосового сообщения.`;
+
+        return await this.generateMessage(prompt);
+    }
+
+    async generatePhotoMessage(account1, account2) {
+        const prompt = `Напиши сообщение от ${account1} к ${account2} с описанием фото.
+        Сообщение должно описывать, что на фото и почему это интересно.
+        Длина: 1-2 предложения.
+        Напиши только текст сообщения.`;
 
         return await this.generateMessage(prompt);
     }
