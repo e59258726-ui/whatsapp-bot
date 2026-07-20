@@ -15,8 +15,9 @@ class TelegramBot {
         this.bot = new Telegraf(config.BOT_TOKEN);
         this.db = new Database();
         this.service = new ProgressService(this.db);
-        this.service.setBot(this); // Связываем сервис с ботом
+        this.service.setBot(this);
         this.clients = new Map();
+        this.service.setClients(this.clients);
         this.userStates = new Map();
         this.isRunning = false;
 
@@ -27,12 +28,10 @@ class TelegramBot {
         this.setupActions();
         this.setupErrorHandler();
 
-        // Проверка аккаунтов каждые 5 минут
         setInterval(() => {
             this.checkAccounts();
         }, 5 * 60 * 1000);
 
-        // Мониторинг памяти
         setInterval(() => {
             const used = process.memoryUsage();
             console.log(`📊 Общая память: RSS=${Math.round(used.rss / 1024 / 1024)}MB, Heap=${Math.round(used.heapUsed / 1024 / 1024)}MB`);
@@ -42,9 +41,6 @@ class TelegramBot {
         console.log('✅ Бот инициализирован');
     }
 
-    // ============================================
-    // ОБРАБОТЧИК ОШИБОК
-    // ============================================
     setupErrorHandler() {
         this.bot.catch((err, ctx) => {
             console.error(`❌ Ошибка:`, err);
@@ -60,9 +56,6 @@ class TelegramBot {
         });
     }
 
-    // ============================================
-    // КЛАВИАТУРЫ
-    // ============================================
     getMainKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('📊 Статистика', 'main_stats')],
@@ -103,9 +96,6 @@ class TelegramBot {
         ]);
     }
 
-    // ============================================
-    // КОМАНДЫ
-    // ============================================
     setupCommands() {
         this.bot.use(async (ctx, next) => {
             console.log(`📨 [${new Date().toISOString()}] Сообщение:`, {
@@ -178,9 +168,6 @@ class TelegramBot {
         });
     }
 
-    // ============================================
-    // МЕТОДЫ КОМАНД
-    // ============================================
     async startAddAccount(ctx) {
         this.userStates.set(ctx.from.id, { step: 'waiting_phone', phone: null, name: null });
         await ctx.reply(
@@ -232,9 +219,6 @@ class TelegramBot {
         );
     }
 
-    // ============================================
-    // ОБРАБОТЧИКИ ТЕКСТА
-    // ============================================
     setupHandlers() {
         this.bot.on('text', async (ctx) => {
             const userId = ctx.from.id;
@@ -316,9 +300,6 @@ class TelegramBot {
         });
     }
 
-    // ============================================
-    // INLINE КНОПКИ (ACTIONS)
-    // ============================================
     setupActions() {
         // Главное меню
         this.bot.action('main_stats', async (ctx) => {
@@ -504,9 +485,6 @@ class TelegramBot {
         });
     }
 
-    // ============================================
-    // ОТОБРАЖЕНИЕ ДАННЫХ
-    // ============================================
     async showAccounts(ctx) {
         try {
             const accounts = await this.db.getAccounts();
@@ -589,9 +567,6 @@ class TelegramBot {
         }
     }
 
-    // ============================================
-    // ПРОВЕРКА АККАУНТОВ
-    // ============================================
     async checkAccounts() {
         try {
             console.log('🔍 Проверка состояния аккаунтов...');
@@ -616,7 +591,10 @@ class TelegramBot {
                 }
                 
                 try {
-                    const isAuth = await client.getAuthStatus();
+                    const isAuth = await Promise.race([
+                        client.getAuthStatus(),
+                        new Promise((resolve) => setTimeout(() => resolve(false), 10000))
+                    ]);
                     
                     if (!isAuth) {
                         console.log(`⚠️ Аккаунт ${account.phone} не авторизован`);
@@ -675,9 +653,6 @@ class TelegramBot {
         }
     }
 
-    // ============================================
-    // АВТОРИЗАЦИЯ WHATSAPP
-    // ============================================
     async startAuth(ctx, phone, name, method = 'qr') {
         try {
             console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
@@ -696,7 +671,6 @@ class TelegramBot {
                 step: 'waiting_auth' 
             });
 
-            // === QR ===
             if (method === 'qr') {
                 let qrSent = false;
                 
@@ -726,7 +700,7 @@ class TelegramBot {
                         await ctx.replyWithPhoto(
                             { source: qr },
                             {
-                                caption: `📱 QR код для ${phone}\n\nПосле сканирования нажмите "✅ Всё готово"`,
+                                caption: `📱 QR код para ${phone}\n\nПосле сканирования нажмите "✅ Всё готово"`,
                                 ...this.getAuthKeyboard()
                             }
                         );
@@ -736,19 +710,17 @@ class TelegramBot {
                 await client.start();
             }
 
-            // === КОД 8 ЦИФР ===
             if (method === 'code') {
                 await client.start();
-                
                 await new Promise(resolve => setTimeout(resolve, 3000));
                 
                 try {
-                    console.log(`🔢 Генерация кода для ${phone}...`);
+                    console.log(`🔢 Генерация кода para ${phone}...`);
                     const code = await client.requestPairingCode(phone);
                     console.log(`✅ Код получен: ${code}`);
                     
                     await ctx.reply(
-                        `🔢 *Ваш 8-значный код для ${phone}:*\n\n` +
+                        `🔢 *Ваш 8-значный код para ${phone}:*\n\n` +
                         `\`${code}\`\n\n` +
                         `📱 Откройте WhatsApp на телефоне\n` +
                         `1️⃣ Нажмите на три точки (⋮)\n` +
@@ -774,7 +746,6 @@ class TelegramBot {
                 }
             }
 
-            // === ОБЩИЕ ОБРАБОТЧИКИ ===
             client.on('authenticated', async () => {
                 console.log(`✅ ${phone} авторизован!`);
                 await this.db.updateAccountStatus(phone, true);
@@ -788,13 +759,13 @@ class TelegramBot {
                 
                 console.log(`🔴 ${phone} отключен: ${reason}`);
                 
-                let message = `⚠️ *Сессия WhatsApp истекла для ${phone}!*\n\n`;
+                let message = `⚠️ *Сессия WhatsApp истекла para ${phone}!*\n\n`;
                 
                 if (isBan) {
                     message += `🚫 *Аккаунт забанен WhatsApp!*\n\n` +
                                `📌 Причина: ${reason} (Бан)\n` +
                                `❌ Аккаунт не может быть восстановлен автоматически\n\n` +
-                               `🔄 Для восстановления:\n` +
+                               `🔄 Para восстановления:\n` +
                                `1️⃣ Удалите аккаунт через "❌ Удалить аккаунт"\n` +
                                `2️⃣ Добавьте заново через "➕ Добавить аккаунт"`;
                 } else {
@@ -864,9 +835,6 @@ class TelegramBot {
         }
     }
 
-    // ============================================
-    // ЗАПУСК И ОСТАНОВКА
-    // ============================================
     async start() {
         try {
             console.log('🚀 Запуск бота...');
