@@ -1,6 +1,5 @@
 FROM node:20-alpine
 
-# Устанавливаем Chromium
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -14,8 +13,6 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 COPY package*.json ./
-
-# Используем npm install вместо npm ci (не требует package-lock.json)
 RUN npm install --production --no-audit --no-fund
 
 COPY . .
