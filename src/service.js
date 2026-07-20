@@ -55,7 +55,6 @@ class ProgressService {
         if (!this.isRunning) return;
 
         try {
-            // Проверяем общее время прогрева
             const elapsedHours = (Date.now() - this.startTime) / (1000 * 60 * 60);
             if (elapsedHours >= config.PROGRESS_DURATION_HOURS) {
                 console.log(`✅ Время прогрева (${config.PROGRESS_DURATION_HOURS} часов) истекло`);
@@ -80,7 +79,6 @@ class ProgressService {
                 return;
             }
 
-            // Активная фаза
             console.log(`🟢 АКТИВНАЯ ФАЗА: отправка сообщений...`);
             this.isActive = true;
             this.isResting = false;
@@ -95,7 +93,6 @@ class ProgressService {
 
             await this.runActivePhase(authorized);
 
-            // Фаза отдыха
             console.log(`🔴 ФАЗА ОТДЫХА: ${this.cycleRestTime / 60000} минут...`);
             this.isActive = false;
             this.isResting = true;
@@ -307,6 +304,9 @@ class ProgressService {
         return messages[Math.floor(Math.random() * messages.length)];
     }
 
+    // ============================================
+    // ОТПРАВКА СООБЩЕНИЯ (ОБНОВЛЕННАЯ)
+    // ============================================
     async sendMessage(fromAccount, toAccount, message, type) {
         if (!this.isActive) {
             console.log(`⏸️ Пропускаем сообщение (режим отдыха)`);
@@ -329,10 +329,23 @@ class ProgressService {
                 return;
             }
             
+            // ===== ПРОВЕРКА АВТОРИЗАЦИИ =====
             if (!fromClient.isAuthenticated) {
-                console.log(`❌ Клиент ${fromAccount.phone} не авторизован`);
+                console.log(`❌ Клиент ${fromAccount.phone} НЕ АВТОРИЗОВАН`);
                 await this.db.updateAccountStatus(fromAccount.phone, false);
                 return;
+            }
+            
+            // ===== ПРОВЕРКА СТАТУСА ЧЕРЕЗ WHATSAPP =====
+            try {
+                const isAuth = await fromClient.getAuthStatus();
+                if (!isAuth) {
+                    console.log(`❌ Аккаунт ${fromAccount.phone} не активен в WhatsApp`);
+                    await this.db.updateAccountStatus(fromAccount.phone, false);
+                    return;
+                }
+            } catch (error) {
+                console.log(`⚠️ Не удалось проверить статус ${fromAccount.phone}`);
             }
             
             try {
@@ -342,7 +355,7 @@ class ProgressService {
                 await this.db.incrementMessages();
             } catch (sendError) {
                 console.error(`❌ Ошибка отправки:`, sendError);
-                if (sendError.message.includes('Не авторизован')) {
+                if (sendError.message.includes('Не авторизован') || sendError.message.includes('closed')) {
                     await this.db.updateAccountStatus(fromAccount.phone, false);
                 }
             }
