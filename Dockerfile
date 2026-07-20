@@ -1,5 +1,6 @@
 FROM node:20-alpine
 
+# Устанавливаем Chromium
 RUN apk add --no-cache \
     chromium \
     nss \
