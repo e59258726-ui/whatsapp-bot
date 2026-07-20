@@ -64,28 +64,50 @@ class ProgressService {
                 return;
             }
 
-            const accounts = await this.db.getAccounts();
-            const authorized = accounts.filter(a => a.is_authenticated);
+            // ===== ВСЕ АККАУНТЫ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ =====
+            const allAccounts = await this.db.getAccounts(); // БЕЗ user_id - все аккаунты
+            const authorized = allAccounts.filter(a => a.is_authenticated);
+
+            console.log(`📱 Всего аккаунтов в БД: ${allAccounts.length}`);
+            console.log(`📱 Авторизованных: ${authorized.length}`);
 
             if (authorized.length < 2) {
                 console.log(`⚠️ Нужно минимум 2 аккаунта. Сейчас: ${authorized.length}`);
+                
+                let accountsList = '';
+                for (const acc of allAccounts) {
+                    const status = acc.is_authenticated ? '🟢' : '🔴';
+                    accountsList += `  ${status} ${acc.phone} (пользователь ${acc.user_id})\n`;
+                }
+                
                 await this.sendNotification(
                     `⚠️ *Недостаточно аккаунтов для прогрева!*\n\n` +
                     `📱 Нужно минимум 2 аккаунта.\n` +
                     `📱 Сейчас: ${authorized.length}\n\n` +
-                    `➕ Добавьте аккаунты через "➕ Добавить аккаунт"`
+                    `📋 *Все аккаунты в системе:*\n${accountsList || '  Нет аккаунтов'}\n\n` +
+                    `➕ Добавьте аккаунты через "➕ Добавить аккаунт"\n` +
+                    `🔐 Авторизуйте их через QR или код`
                 );
                 this.isRunning = false;
                 return;
             }
 
+            this.totalAccounts = authorized.length;
+            console.log(`📨 Найдено ${authorized.length} аккаунтов`);
+
             console.log(`🟢 АКТИВНАЯ ФАЗА: отправка сообщений...`);
             this.isActive = true;
             this.isResting = false;
             
+            let accountsList = '';
+            for (const acc of authorized) {
+                accountsList += `  🟢 ${acc.phone}\n`;
+            }
+            
             await this.sendNotification(
                 `🟢 *АККАУНТЫ АКТИВНЫ!*\n\n` +
-                `📱 Начинается общение между ${authorized.length} аккаунтами.\n` +
+                `📱 Начинается общение между ${authorized.length} аккаунтами.\n\n` +
+                `📋 *Аккаунты:*\n${accountsList}\n\n` +
                 `⏱️ Активная фаза: ${this.cycleActiveTime / 60000} минут.\n` +
                 `⏰ Осталось: ${Math.round(config.PROGRESS_DURATION_HOURS - elapsedHours)} часов\n\n` +
                 `💬 Аккаунты начали переписываться!`
@@ -305,7 +327,7 @@ class ProgressService {
     }
 
     // ============================================
-    // ОТПРАВКА СООБЩЕНИЯ (ОБНОВЛЕННАЯ)
+    // ОТПРАВКА СООБЩЕНИЯ
     // ============================================
     async sendMessage(fromAccount, toAccount, message, type) {
         if (!this.isActive) {
@@ -329,14 +351,12 @@ class ProgressService {
                 return;
             }
             
-            // ===== ПРОВЕРКА АВТОРИЗАЦИИ =====
             if (!fromClient.isAuthenticated) {
                 console.log(`❌ Клиент ${fromAccount.phone} НЕ АВТОРИЗОВАН`);
                 await this.db.updateAccountStatus(fromAccount.phone, false);
                 return;
             }
             
-            // ===== ПРОВЕРКА СТАТУСА ЧЕРЕЗ WHATSAPP =====
             try {
                 const isAuth = await fromClient.getAuthStatus();
                 if (!isAuth) {
