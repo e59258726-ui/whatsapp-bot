@@ -118,6 +118,39 @@ class TelegramBot {
             }
         });
 
+// src/bot.js - добавьте в setupCommands()
+
+// === КОМАНДА ДЛЯ ПРОВЕРКИ СООБЩЕНИЙ ===
+this.bot.command('messages', async (ctx) => {
+    const stats = this.service.gemini.getStats();
+    await ctx.reply(
+        `📝 *Статистика сообщений*\n\n` +
+        `📊 Всего сообщений: ${stats.total}\n` +
+        `📌 Последнее: ${stats.lastMessage}\n\n` +
+        `📁 Файл: messages.txt\n` +
+        `📌 Чтобы добавить сообщения, отредактируйте файл messages.txt`,
+        { parse_mode: 'Markdown' }
+    );
+});
+
+// === КОМАНДА ДЛЯ ДОБАВЛЕНИЯ СООБЩЕНИЯ ===
+this.bot.command('add_message', async (ctx) => {
+    const text = ctx.message.text.replace('/add_message ', '').trim();
+    if (!text) {
+        await ctx.reply('❌ Напишите сообщение после команды\nПример: `/add_message Привет! Как дела?`');
+        return;
+    }
+    
+    const gemini = this.service.gemini;
+    if (gemini.addMessage) {
+        gemini.addMessage(text);
+        await ctx.reply(`✅ Сообщение добавлено!\n\n💬 "${text}"\n\n📁 Всего сообщений: ${gemini.messageLoader.messages.length}`);
+    } else {
+        await ctx.reply('❌ Функция недоступна');
+    }
+});
+
+        
         this.bot.command('start', async (ctx) => {
             console.log(`✅ /start от ${ctx.from.id}`);
             await ctx.reply(
