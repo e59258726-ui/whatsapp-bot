@@ -1,4 +1,4 @@
-// src/database.js - УБРАНЫ ПАРЫ
+// src/database.js
 const { Pool } = require('pg');
 const config = require('./config');
 
@@ -141,9 +141,16 @@ class Database {
     async deleteAccount(phone) {
         try {
             const client = await this.pool.connect();
+            // Сначала удаляем сообщения
+            await client.query(`
+                DELETE FROM messages 
+                WHERE from_account_id = (SELECT id FROM accounts WHERE phone = $1)
+                   OR to_account_id = (SELECT id FROM accounts WHERE phone = $1)
+            `, [phone]);
+            // Затем удаляем аккаунт
             await client.query('DELETE FROM accounts WHERE phone = $1', [phone]);
             client.release();
-            console.log(`✅ Аккаунт ${phone} удален`);
+            console.log(`✅ Аккаунт ${phone} удален вместе с сообщениями`);
         } catch (error) {
             console.error('❌ Ошибка удаления аккаунта:', error);
             throw error;
