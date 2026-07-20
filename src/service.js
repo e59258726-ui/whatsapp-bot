@@ -1,5 +1,6 @@
 // src/service.js
 const GeminiAI = require('./gemini');
+const config = require('./config');
 
 class ProgressService {
     constructor(db) {
@@ -14,6 +15,12 @@ class ProgressService {
         this.isComplete = false;
         this.bot = null;
         this.clientsMap = null;
+        this.isActive = false;
+        this.isResting = false;
+        this.cycleActiveTime = config.CYCLE_ACTIVE_TIME || 10 * 60 * 1000;
+        this.cycleRestTime = config.CYCLE_REST_TIME || 10 * 60 * 1000;
+        this.cycleTimer = null;
+        this.maxMessagesPerCycle = 30;
     }
 
     setBot(bot) {
@@ -31,94 +38,175 @@ class ProgressService {
         }
 
         console.log('🚀 Запуск сервиса прогрева');
+        console.log(`⏱️ Активен: ${this.cycleActiveTime / 60000} минут`);
+        console.log(`⏱️ Отдых: ${this.cycleRestTime / 60000} минут`);
+        
         this.isRunning = true;
         this.startTime = new Date();
         this.messagesSent = 0;
         this.isComplete = false;
         this.processedAccounts = 0;
-
-        await this.runProgressLoop();
+        this.isResting = false;
+        
+        await this.runCycle();
     }
 
-    async runProgressLoop() {
+    async runCycle() {
         if (!this.isRunning) return;
 
         try {
+            // Проверяем общее время прогрева
+            const elapsedHours = (Date.now() - this.startTime) / (1000 * 60 * 60);
+            if (elapsedHours >= config.PROGRESS_DURATION_HOURS) {
+                console.log(`✅ Время прогрева (${config.PROGRESS_DURATION_HOURS} часов) истекло`);
+                this.isComplete = true;
+                this.isRunning = false;
+                await this.sendCompleteNotification(Math.round(elapsedHours * 60));
+                return;
+            }
+
             const accounts = await this.db.getAccounts();
             const authorized = accounts.filter(a => a.is_authenticated);
 
             if (authorized.length < 2) {
                 console.log(`⚠️ Нужно минимум 2 аккаунта. Сейчас: ${authorized.length}`);
-                if (this.bot) {
-                    await this.sendNotification(
-                        `⚠️ *Недостаточно аккаунтов для прогрева!*\n\n` +
-                        `📱 Нужно минимум 2 аккаунта.\n` +
-                        `📱 Сейчас: ${authorized.length}\n\n` +
-                        `➕ Добавьте аккаунты через "➕ Добавить аккаунт"`
-                    );
-                }
+                await this.sendNotification(
+                    `⚠️ *Недостаточно аккаунтов для прогрева!*\n\n` +
+                    `📱 Нужно минимум 2 аккаунта.\n` +
+                    `📱 Сейчас: ${authorized.length}\n\n` +
+                    `➕ Добавьте аккаунты через "➕ Добавить аккаунт"`
+                );
                 this.isRunning = false;
                 return;
             }
 
-            this.totalAccounts = authorized.length;
-            console.log(`📨 Найдено ${authorized.length} аккаунтов`);
-
-            const shuffled = authorized.sort(() => Math.random() - 0.5);
-            let processed = 0;
+            // Активная фаза
+            console.log(`🟢 АКТИВНАЯ ФАЗА: отправка сообщений...`);
+            this.isActive = true;
+            this.isResting = false;
             
-            for (let i = 0; i < shuffled.length; i++) {
-                if (!this.isRunning) break;
+            await this.sendNotification(
+                `🟢 *АККАУНТЫ АКТИВНЫ!*\n\n` +
+                `📱 Начинается общение между ${authorized.length} аккаунтами.\n` +
+                `⏱️ Активная фаза: ${this.cycleActiveTime / 60000} минут.\n` +
+                `⏰ Осталось: ${Math.round(config.PROGRESS_DURATION_HOURS - elapsedHours)} часов\n\n` +
+                `💬 Аккаунты начали переписываться!`
+            );
 
-                const fromAccount = shuffled[i];
-                const toAccount = shuffled[(i + 1) % shuffled.length];
+            await this.runActivePhase(authorized);
 
-                try {
-                    const messageType = this.getRandomMessageType();
-                    const message = await this.generateMessage(fromAccount, toAccount, messageType);
-                    
-                    await this.sendMessage(fromAccount, toAccount, message, messageType);
-                    this.messagesSent++;
-                    processed++;
-                    this.processedAccounts = processed;
-                    
-                    console.log(`💬 [${messageType}] ${fromAccount.phone} → ${toAccount.phone}: ${message.substring(0, 50)}...`);
-                    
-                    const delay = Math.floor(Math.random() * 30000) + 10000;
-                    await this.sleep(delay);
-                    
-                } catch (error) {
-                    console.error(`❌ Ошибка при отправке от ${fromAccount.phone}:`, error);
-                }
-            }
+            // Фаза отдыха
+            console.log(`🔴 ФАЗА ОТДЫХА: ${this.cycleRestTime / 60000} минут...`);
+            this.isActive = false;
+            this.isResting = true;
+            
+            await this.closeAllBrowsers();
+            
+            await this.sendNotification(
+                `😴 *АККАУНТЫ ОТДЫХАЮТ!*\n\n` +
+                `⏱️ Фаза отдыха: ${this.cycleRestTime / 60000} минут.\n` +
+                `🔄 Браузеры закрыты для экономии памяти.\n` +
+                `⏰ Осталось: ${Math.round(config.PROGRESS_DURATION_HOURS - elapsedHours)} часов\n\n` +
+                `⏳ Продолжим через ${this.cycleRestTime / 60000} минут...`
+            );
 
-            if (processed >= shuffled.length && this.isRunning) {
-                console.log('✅ Все аккаунты обработаны!');
-                await this.completeProgress();
-                return;
-            }
+            await this.sleep(this.cycleRestTime);
 
-            if (processed < shuffled.length && this.isRunning) {
-                console.log(`⏳ Осталось ${shuffled.length - processed} аккаунтов`);
-                setTimeout(() => this.runProgressLoop(), 5000);
+            if (this.isRunning) {
+                console.log(`🔄 НОВЫЙ ЦИКЛ...`);
+                await this.runCycle();
             }
 
         } catch (error) {
-            console.error('❌ Ошибка в цикле прогрева:', error);
+            console.error('❌ Ошибка в цикле:', error);
             if (this.isRunning) {
-                setTimeout(() => this.runProgressLoop(), 10000);
+                setTimeout(() => this.runCycle(), 10000);
             }
         }
     }
 
-    async completeProgress() {
+    async runActivePhase(authorized) {
+        const startTime = Date.now();
+        const activeDuration = this.cycleActiveTime;
+        let messageCount = 0;
+
+        console.log(`📨 Найдено ${authorized.length} аккаунтов`);
+
+        const shuffled = authorized.sort(() => Math.random() - 0.5);
+        let index = 0;
+
+        while (this.isRunning && this.isActive) {
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= activeDuration) {
+                console.log(`⏰ Время активной фазы истекло`);
+                break;
+            }
+
+            if (messageCount >= this.maxMessagesPerCycle) {
+                console.log(`📨 Достигнут лимит сообщений за фазу (${this.maxMessagesPerCycle})`);
+                break;
+            }
+
+            const fromAccount = shuffled[index % shuffled.length];
+            const toAccount = shuffled[(index + 1) % shuffled.length];
+
+            try {
+                const messageType = this.getRandomMessageType();
+                const message = await this.generateMessage(fromAccount, toAccount, messageType);
+                
+                await this.sendMessage(fromAccount, toAccount, message, messageType);
+                this.messagesSent++;
+                messageCount++;
+                
+                console.log(`💬 [${messageType}] ${fromAccount.phone} → ${toAccount.phone}: ${message.substring(0, 50)}...`);
+                
+                const delay = Math.floor(Math.random() * 10000) + 5000;
+                await this.sleep(delay);
+                
+                index++;
+
+            } catch (error) {
+                console.error(`❌ Ошибка отправки:`, error);
+                await this.sleep(5000);
+            }
+        }
+
+        console.log(`✅ Активная фаза завершена. Отправлено ${messageCount} сообщений`);
+    }
+
+    async closeAllBrowsers() {
+        console.log(`🔄 Закрытие всех браузеров...`);
+        for (const [phone, client] of this.clientsMap) {
+            try {
+                await client.closeBrowser();
+                console.log(`✅ Браузер закрыт для ${phone}`);
+            } catch (error) {
+                console.error(`❌ Ошибка закрытия ${phone}:`, error);
+            }
+        }
+    }
+
+    async stop() {
+        if (!this.isRunning && !this.isComplete) {
+            console.log('⚠️ Прогрев не запущен');
+            return;
+        }
+
+        console.log('⏹ Остановка сервиса прогрева');
         this.isRunning = false;
-        this.isComplete = true;
+        this.isActive = false;
+        this.isResting = false;
         
-        const duration = Math.round((new Date() - this.startTime) / 1000 / 60);
+        await this.closeAllBrowsers();
         
-        console.log(`✅ Прогрев завершен! Отправлено ${this.messagesSent} сообщений за ${duration} минут`);
-        await this.sendCompleteNotification(duration);
+        if (!this.isComplete) {
+            await this.sendStopNotification();
+        }
+        
+        if (this.cycleTimer) {
+            clearTimeout(this.cycleTimer);
+            this.cycleTimer = null;
+        }
     }
 
     async sendCompleteNotification(duration) {
@@ -139,7 +227,7 @@ class ProgressService {
                 `  📱 Аккаунтов: ${authorized.length}\n` +
                 `  💬 Отправлено: ${this.messagesSent} сообщений\n` +
                 `  ⏱️ Время: ${duration} минут\n\n` +
-                `📋 *Аккаунты:*\n${accountsList}\n\n` +
+                `📋 *Аккаунты:*\n${accountsList || '  Нет активных аккаунтов'}\n\n` +
                 `😴 *Аккаунтам нужно отдохнуть!*\n` +
                 `⏳ Рекомендуется подождать 1-2 часа перед следующим прогревом.\n\n` +
                 `🔄 Чтобы запустить снова: /start_progress`;
@@ -160,25 +248,6 @@ class ProgressService {
             });
         } catch (error) {
             console.error('❌ Ошибка отправки уведомления:', error);
-        }
-    }
-
-    async stop() {
-        if (!this.isRunning && !this.isComplete) {
-            console.log('⚠️ Прогрев не запущен');
-            return;
-        }
-
-        console.log('⏹ Остановка сервиса прогрева');
-        this.isRunning = false;
-        
-        if (!this.isComplete) {
-            await this.sendStopNotification();
-        }
-        
-        if (this.interval) {
-            clearInterval(this.interval);
-            this.interval = null;
         }
     }
 
@@ -239,6 +308,11 @@ class ProgressService {
     }
 
     async sendMessage(fromAccount, toAccount, message, type) {
+        if (!this.isActive) {
+            console.log(`⏸️ Пропускаем сообщение (режим отдыха)`);
+            return;
+        }
+
         try {
             console.log(`📨 [${type}] ${fromAccount.phone} → ${toAccount.phone}: ${message}`);
             
@@ -270,11 +344,6 @@ class ProgressService {
                 console.error(`❌ Ошибка отправки:`, sendError);
                 if (sendError.message.includes('Не авторизован')) {
                     await this.db.updateAccountStatus(fromAccount.phone, false);
-                    if (this.bot) {
-                        await this.bot.sendNotification(
-                            `⚠️ Аккаунт ${fromAccount.phone} потерял авторизацию!`
-                        );
-                    }
                 }
             }
         } catch (error) {
