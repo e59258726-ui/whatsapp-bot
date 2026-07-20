@@ -14,15 +14,15 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci --only=production --no-audit --no-fund
 
 COPY . .
 
-RUN mkdir -p sessions logs auth_info_baileys
+RUN mkdir -p sessions logs
 
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=256"
 
 EXPOSE 10000
 
