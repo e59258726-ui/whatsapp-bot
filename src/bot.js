@@ -390,10 +390,12 @@ class TelegramBot {
 
   // src/bot.js - исправленный auth_ready
 
+// src/bot.js - исправленный auth_ready
+
 this.bot.action('auth_ready', async (ctx) => {
     try {
-        // Редактируем текущее сообщение вместо удаления
-        await ctx.editMessageText(
+        // Отправляем новое сообщение вместо редактирования
+        await ctx.reply(
             `⏳ *Ожидание подключения...*\n\n` +
             `📱 Проверяю статус аккаунта...\n` +
             `⏱️ Пожалуйста, подождите несколько секунд.`,
@@ -418,6 +420,7 @@ this.bot.action('auth_ready', async (ctx) => {
         let isAuth = false;
         let attempts = 0;
         const maxAttempts = 10;
+        let lastMsg = null;
         
         while (attempts < maxAttempts) {
             try {
@@ -430,8 +433,10 @@ this.bot.action('auth_ready', async (ctx) => {
             attempts++;
             await new Promise(resolve => setTimeout(resolve, 3000));
             
+            // Обновляем сообщение о статусе (если есть)
             if (attempts % 3 === 0) {
-                await ctx.editMessageText(
+                // Отправляем новое сообщение вместо редактирования
+                await ctx.reply(
                     `⏳ *Ожидание подключения...*\n\n` +
                     `📱 Проверяю статус аккаунта...\n` +
                     `⏱️ Попытка ${attempts}/${maxAttempts}\n\n` +
@@ -444,7 +449,7 @@ this.bot.action('auth_ready', async (ctx) => {
         if (isAuth) {
             await this.db.updateAccountStatus(state.phone, true);
             
-            await ctx.editMessageText(
+            await ctx.reply(
                 `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
                 `⚙️ *Настройка прогрева:*\n` +
                 `1️⃣ Выберите время прогрева:\n` +
@@ -470,7 +475,7 @@ this.bot.action('auth_ready', async (ctx) => {
             this.userStates.delete(userId);
             
         } else {
-            await ctx.editMessageText(
+            await ctx.reply(
                 `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n` +
                 `⏱️ Время ожидания истекло.\n\n` +
                 `🔄 Попробуйте снова:\n` +
