@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-progress-bot",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "WhatsApp Progress Bot with Telegram interface",
   "main": "index.js",
   "scripts": {
@@ -14,9 +14,8 @@
     "qrcode": "^1.5.4",
     "pg": "^8.13.1",
     "dotenv": "^16.4.7",
-    "whatsapp-web.js": "^1.26.0",
-    "puppeteer-core": "^24.4.0",
-    "edge-paths": "^3.0.1"
+    "baileys": "^6.7.10",
+    "pino": "^8.17.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
