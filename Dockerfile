@@ -1,9 +1,20 @@
 FROM node:20-alpine
 
+# Устанавливаем git и другие зависимости
+RUN apk add --no-cache \
+    git \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/cache/apk/*
+
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --production --no-audit --no-fund
+
+# Устанавливаем зависимости
+RUN npm install --production --no-audit --no-fund || \
+    npm install --production --no-audit
 
 COPY . .
 
