@@ -14,7 +14,9 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production --no-audit --no-fund
+
+# Используем npm install вместо npm ci (не требует package-lock.json)
+RUN npm install --production --no-audit --no-fund
 
 COPY . .
 
