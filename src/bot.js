@@ -388,108 +388,107 @@ class TelegramBot {
             await this.startAuth(ctx, state.phone, state.name || 'WhatsApp', 'code');
         });
 
-        // === АВТОРИЗАЦИЯ: ВСЁ ГОТОВО ===
-        this.bot.action('auth_ready', async (ctx) => {
+  // src/bot.js - исправленный auth_ready
+
+this.bot.action('auth_ready', async (ctx) => {
+    try {
+        // Редактируем текущее сообщение вместо удаления
+        await ctx.editMessageText(
+            `⏳ *Ожидание подключения...*\n\n` +
+            `📱 Проверяю статус аккаунта...\n` +
+            `⏱️ Пожалуйста, подождите несколько секунд.`,
+            { parse_mode: 'Markdown' }
+        );
+        
+        const userId = ctx.from.id;
+        const state = this.userStates.get(userId);
+        
+        if (!state || !state.phone) {
+            await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
+            return;
+        }
+        
+        const client = this.clients.get(state.phone);
+        if (!client) {
+            await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
+            this.userStates.delete(userId);
+            return;
+        }
+        
+        let isAuth = false;
+        let attempts = 0;
+        const maxAttempts = 10;
+        
+        while (attempts < maxAttempts) {
             try {
-                await ctx.deleteMessage();
-                
-                const waitingMsg = await ctx.reply(
+                isAuth = await client.getAuthStatus();
+                if (isAuth) break;
+            } catch (error) {
+                console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
+            }
+            
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            if (attempts % 3 === 0) {
+                await ctx.editMessageText(
                     `⏳ *Ожидание подключения...*\n\n` +
                     `📱 Проверяю статус аккаунта...\n` +
-                    `⏱️ Пожалуйста, подождите несколько секунд.`,
+                    `⏱️ Попытка ${attempts}/${maxAttempts}\n\n` +
+                    `💡 Убедитесь, что вы отсканировали QR-код в WhatsApp`,
                     { parse_mode: 'Markdown' }
                 );
-                
-                const userId = ctx.from.id;
-                const state = this.userStates.get(userId);
-                
-                if (!state || !state.phone) {
-                    await ctx.reply('❌ Сессия истекла. Начните заново через /add_account');
-                    return;
-                }
-                
-                const client = this.clients.get(state.phone);
-                if (!client) {
-                    await ctx.reply('❌ Клиент не найден. Попробуйте заново через /add_account');
-                    this.userStates.delete(userId);
-                    return;
-                }
-                
-                let isAuth = false;
-                let attempts = 0;
-                const maxAttempts = 10;
-                
-                while (attempts < maxAttempts) {
-                    try {
-                        isAuth = await client.getAuthStatus();
-                        if (isAuth) break;
-                    } catch (error) {
-                        console.log(`⏳ Попытка ${attempts + 1}/${maxAttempts}...`);
-                    }
-                    
-                    attempts++;
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                    
-                    if (attempts % 3 === 0) {
-                        await ctx.editMessageText(
-                            `⏳ *Ожидание подключения...*\n\n` +
-                            `📱 Проверяю статус аккаунта...\n` +
-                            `⏱️ Попытка ${attempts}/${maxAttempts}\n\n` +
-                            `💡 Убедитесь, что вы отсканировали QR-код в WhatsApp`,
-                            { parse_mode: 'Markdown' }
-                        );
-                    }
-                }
-                
-                if (isAuth) {
-                    await this.db.updateAccountStatus(state.phone, true);
-                    
-                    await ctx.editMessageText(
-                        `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
-                        `📱 Аккаунт авторизован и готов к работе.\n\n` +
-                        `⚙️ *Настройка прогрева:*\n` +
-                        `1️⃣ Выберите время прогрева:\n` +
-                        `   🟢 6 часов\n` +
-                        `   🟢 12 часов\n` +
-                        `   🟢 24 часа\n\n` +
-                        `2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n` +
-                        `📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
-                        {
-                            parse_mode: 'Markdown',
-                            ...Markup.inlineKeyboard([
-                                [
-                                    Markup.button.callback('🕐 6 часов', 'set_progress_6'),
-                                    Markup.button.callback('🕐 12 часов', 'set_progress_12'),
-                                    Markup.button.callback('🕐 24 часа', 'set_progress_24')
-                                ],
-                                [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
-                                [Markup.button.callback('📊 Статистика', 'main_stats')]
-                            ])
-                        }
-                    );
-                    
-                    this.userStates.delete(userId);
-                    
-                } else {
-                    await ctx.editMessageText(
-                        `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n` +
-                        `⏱️ Время ожидания истекло.\n\n` +
-                        `🔄 Попробуйте снова:\n` +
-                        `1️⃣ Нажмите "➕ Добавить аккаунт"\n` +
-                        `2️⃣ Введите номер ${state.phone}\n` +
-                        `3️⃣ Отсканируйте QR-код\n` +
-                        `4️⃣ Нажмите "✅ Всё готово"`,
-                        { parse_mode: 'Markdown' }
-                    );
-                    
-                    this.userStates.delete(userId);
-                }
-                
-            } catch (error) {
-                console.error('❌ Ошибка auth_ready:', error);
-                await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
             }
-        });
+        }
+        
+        if (isAuth) {
+            await this.db.updateAccountStatus(state.phone, true);
+            
+            await ctx.editMessageText(
+                `✅ *Аккаунт ${state.phone} успешно подключился!* 🎉\n\n` +
+                `⚙️ *Настройка прогрева:*\n` +
+                `1️⃣ Выберите время прогрева:\n` +
+                `   🟢 6 часов\n` +
+                `   🟢 12 часов\n` +
+                `   🟢 24 часа\n\n` +
+                `2️⃣ Нажмите "▶️ Запустить прогрев" когда будет 2+ аккаунта\n\n` +
+                `📌 *Важно:* Для прогрева нужно минимум 2 аккаунта!`,
+                {
+                    parse_mode: 'Markdown',
+                    ...Markup.inlineKeyboard([
+                        [
+                            Markup.button.callback('🕐 6 часов', 'set_progress_6'),
+                            Markup.button.callback('🕐 12 часов', 'set_progress_12'),
+                            Markup.button.callback('🕐 24 часа', 'set_progress_24')
+                        ],
+                        [Markup.button.callback('▶️ Запустить прогрев', 'main_start')],
+                        [Markup.button.callback('📊 Статистика', 'main_stats')]
+                    ])
+                }
+            );
+            
+            this.userStates.delete(userId);
+            
+        } else {
+            await ctx.editMessageText(
+                `❌ *Не удалось подключить аккаунт ${state.phone}!*\n\n` +
+                `⏱️ Время ожидания истекло.\n\n` +
+                `🔄 Попробуйте снова:\n` +
+                `1️⃣ Нажмите "➕ Добавить аккаунт"\n` +
+                `2️⃣ Введите номер ${state.phone}\n` +
+                `3️⃣ Отсканируйте QR-код\n` +
+                `4️⃣ Нажмите "✅ Всё готово"`,
+                { parse_mode: 'Markdown' }
+            );
+            
+            this.userStates.delete(userId);
+        }
+        
+    } catch (error) {
+        console.error('❌ Ошибка auth_ready:', error);
+        await ctx.reply('❌ Произошла ошибка. Попробуйте снова.');
+    }
+});
 
         // === НОВЫЕ ACTION ДЛЯ ВРЕМЕНИ ПРОГРЕВА ===
         this.bot.action('set_progress_6', async (ctx) => {
