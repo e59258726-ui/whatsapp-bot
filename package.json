@@ -14,8 +14,7 @@
     "qrcode": "^1.5.4",
     "pg": "^8.13.1",
     "dotenv": "^16.4.7",
-    "baileys": "^6.7.10",
-    "pino": "^8.17.2"
+    "baileys": "^6.7.10"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
