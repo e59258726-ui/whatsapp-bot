@@ -54,13 +54,13 @@ app.listen(port, '0.0.0.0', () => {
     console.log(`🌐 HTTP сервер запущен на порту ${port}`);
 });
 
-async function startBot() {
+async function startBotWithRetry() {
     try {
         console.log('🔄 Удаление вебхука...');
         await bot.bot.telegram.deleteWebhook();
         console.log('✅ Вебхук удален');
         
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
         
         console.log('🔄 Сброс offset...');
         await bot.bot.telegram.getUpdates({ offset: -1, limit: 100 });
@@ -84,18 +84,19 @@ async function startBot() {
 
         setInterval(() => {
             const mem = process.memoryUsage();
-            console.log(`📊 Память: RSS=${Math.round(mem.rss / 1024 / 1024)}MB, Heap=${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
-            console.log(`📱 Клиентов: ${bot.clients.size}`);
+            console.log(`📊 Память: RSS=${Math.round(mem.rss / 1024 / 1024)}MB`);
         }, 30000);
 
     } catch (error) {
-        console.error('❌ Ошибка при запуске:', error);
+        console.error('❌ Ошибка:', error);
         
         if (error.message && error.message.includes('409: Conflict')) {
-            console.log('⚠️ Конфликт 409. Повторная попытка через 5 секунд...');
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            console.log('⚠️ Конфликт 409. Ждем 10 секунд и пробуем снова...');
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            
             try {
                 await bot.bot.telegram.deleteWebhook();
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 await bot.bot.launch();
                 bot.isRunning = true;
                 const me = await bot.bot.telegram.getMe();
@@ -110,7 +111,7 @@ async function startBot() {
     }
 }
 
-startBot();
+startBotWithRetry();
 
 process.on('SIGINT', async () => {
     console.log('\n⏹ Остановка...');
