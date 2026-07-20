@@ -58,6 +58,28 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // БЕЗОПАСНЫЙ ОТВЕТ НА CALLBACK
+    // ============================================
+    async safeAnswer(ctx, text = null) {
+        try {
+            if (text) {
+                await ctx.answerCbQuery(text);
+            } else {
+                await ctx.answerCbQuery();
+            }
+        } catch (error) {
+            if (error.message && error.message.includes('query is too old')) {
+                console.log('⚠️ Callback устарел, пропускаем');
+            } else {
+                console.error('❌ Ошибка answerCbQuery:', error);
+            }
+        }
+    }
+
+    // ============================================
+    // КЛАВИАТУРЫ
+    // ============================================
     getMainKeyboard() {
         return Markup.inlineKeyboard([
             [Markup.button.callback('📊 Статистика', 'main_stats')],
@@ -97,6 +119,9 @@ class TelegramBot {
         ]);
     }
 
+    // ============================================
+    // КОМАНДЫ
+    // ============================================
     setupCommands() {
         this.bot.use(async (ctx, next) => {
             console.log(`📨 [${new Date().toISOString()}] Сообщение:`, {
@@ -224,7 +249,6 @@ class TelegramBot {
             }
         });
 
-        // === КОМАНДА ДЛЯ ПРОВЕРКИ СООБЩЕНИЙ ===
         this.bot.command('messages', async (ctx) => {
             const stats = this.service.gemini.getStats();
             await ctx.reply(
@@ -237,7 +261,6 @@ class TelegramBot {
             );
         });
 
-        // === КОМАНДА ДЛЯ ДОБАВЛЕНИЯ СООБЩЕНИЯ ===
         this.bot.command('add_message', async (ctx) => {
             const text = ctx.message.text.replace('/add_message ', '').trim();
             if (!text) {
@@ -260,6 +283,9 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // МЕТОДЫ КОМАНД
+    // ============================================
     async startAddAccount(ctx) {
         const userId = ctx.from.id;
         this.userStates.set(userId, { step: 'waiting_phone', phone: null, name: null });
@@ -356,6 +382,9 @@ class TelegramBot {
         );
     }
 
+    // ============================================
+    // АВТОМАТИЧЕСКАЯ ПРОВЕРКА
+    // ============================================
     async autoCheckAccounts() {
         try {
             if (this.service.isResting) {
@@ -511,6 +540,9 @@ class TelegramBot {
         }
     }
 
+    // ============================================
+    // ОБРАБОТЧИКИ ТЕКСТА
+    // ============================================
     setupHandlers() {
         this.bot.on('text', async (ctx) => {
             const userId = ctx.from.id;
@@ -652,6 +684,9 @@ class TelegramBot {
         });
     }
 
+    // ============================================
+    // ОТОБРАЖЕНИЕ ДАННЫХ
+    // ============================================
     async showSettings(ctx) {
         const speed = config.SEND_SPEED || 'medium';
         const speedText = {
@@ -825,84 +860,87 @@ class TelegramBot {
         }
     }
 
+    // ============================================
+    // INLINE КНОПКИ (ACTIONS)
+    // ============================================
     setupActions() {
         // Главное меню
         this.bot.action('main_stats', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showStats(ctx);
         });
 
         this.bot.action('main_start', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.startProgress(ctx);
         });
 
         this.bot.action('main_stop', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.stopProgress(ctx);
         });
 
         this.bot.action('main_add', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.startAddAccount(ctx);
         });
 
         this.bot.action('main_accounts', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showAccounts(ctx);
         });
 
         this.bot.action('main_check', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await ctx.reply('🔄 Проверяю состояние аккаунтов...');
             await this.autoCheckAccounts();
             await ctx.reply('✅ Проверка завершена. Результаты в логах.');
         });
 
         this.bot.action('main_progress_status', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showProgressStatus(ctx);
         });
 
         this.bot.action('main_settings', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showSettings(ctx);
         });
 
         this.bot.action('main_help', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showHelp(ctx);
         });
 
         // Добавление аккаунта
         this.bot.action('add_cancel', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             this.userStates.delete(ctx.from.id);
             await ctx.reply('❌ Отменено', this.getMainKeyboard());
         });
 
         // === НАСТРОЙКИ: ВРЕМЯ ===
         this.bot.action('settings_time', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showTimeSettings(ctx);
         });
 
         this.bot.action('set_time_6', async (ctx) => {
-            await ctx.answerCbQuery('✅ 6 часов');
+            await this.safeAnswer(ctx, '✅ 6 часов');
             config.PROGRESS_DURATION_HOURS = 6;
             await ctx.reply(`✅ *Установлено время прогрева: 6 часов*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
         });
 
         this.bot.action('set_time_12', async (ctx) => {
-            await ctx.answerCbQuery('✅ 12 часов');
+            await this.safeAnswer(ctx, '✅ 12 часов');
             config.PROGRESS_DURATION_HOURS = 12;
             await ctx.reply(`✅ *Установлено время прогрева: 12 часов*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
         });
 
         this.bot.action('set_time_24', async (ctx) => {
-            await ctx.answerCbQuery('✅ 24 часа');
+            await this.safeAnswer(ctx, '✅ 24 часа');
             config.PROGRESS_DURATION_HOURS = 24;
             await ctx.reply(`✅ *Установлено время прогрева: 24 часа*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
@@ -910,46 +948,46 @@ class TelegramBot {
 
         // === НАСТРОЙКИ: СКОРОСТЬ ===
         this.bot.action('settings_speed', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showSpeedSettings(ctx);
         });
 
         this.bot.action('set_speed_slow', async (ctx) => {
-            await ctx.answerCbQuery('🐢 Медленно');
+            await this.safeAnswer(ctx, '🐢 Медленно');
             config.SEND_SPEED = 'slow';
-            await ctx.reply(`✅ *Установлена медленная скорость*\n\n🕐 Задержка: 2-5 минут между сообщениями`, { parse_mode: 'Markdown' });
+            await ctx.reply(`✅ *Установлена медленная скорость*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
         });
 
         this.bot.action('set_speed_medium', async (ctx) => {
-            await ctx.answerCbQuery('🚶 Средне');
+            await this.safeAnswer(ctx, '🚶 Средне');
             config.SEND_SPEED = 'medium';
-            await ctx.reply(`✅ *Установлена средняя скорость*\n\n🕐 Задержка: 1-3 минуты между сообщениями`, { parse_mode: 'Markdown' });
+            await ctx.reply(`✅ *Установлена средняя скорость*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
         });
 
         this.bot.action('set_speed_fast', async (ctx) => {
-            await ctx.answerCbQuery('🏃 Быстро');
+            await this.safeAnswer(ctx, '🏃 Быстро');
             config.SEND_SPEED = 'fast';
-            await ctx.reply(`✅ *Установлена быстрая скорость*\n\n🕐 Задержка: 30-60 секунд между сообщениями`, { parse_mode: 'Markdown' });
+            await ctx.reply(`✅ *Установлена быстрая скорость*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
         });
 
         this.bot.action('set_speed_human', async (ctx) => {
-            await ctx.answerCbQuery('👤 Как человек');
+            await this.safeAnswer(ctx, '👤 Как человек');
             config.SEND_SPEED = 'human';
-            await ctx.reply(`✅ *Установлен режим "Как человек"*\n\n🕐 Задержка: 1-5 минут (случайный интервал)`, { parse_mode: 'Markdown' });
+            await ctx.reply(`✅ *Установлен режим "Как человек"*`, { parse_mode: 'Markdown' });
             await this.showSettings(ctx);
         });
 
         // === НАСТРОЙКИ: ЦИКЛЫ ===
         this.bot.action('settings_cycles', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await this.showCyclesSettings(ctx);
         });
 
         this.bot.action('set_cycle_10', async (ctx) => {
-            await ctx.answerCbQuery('🟢 10/10');
+            await this.safeAnswer(ctx, '🟢 10/10');
             config.CYCLE_ACTIVE_TIME = 10 * 60 * 1000;
             config.CYCLE_REST_TIME = 10 * 60 * 1000;
             await ctx.reply(`✅ *Установлен режим: 10 мин активен / 10 мин отдых*`, { parse_mode: 'Markdown' });
@@ -957,7 +995,7 @@ class TelegramBot {
         });
 
         this.bot.action('set_cycle_15', async (ctx) => {
-            await ctx.answerCbQuery('🟡 15/10');
+            await this.safeAnswer(ctx, '🟡 15/10');
             config.CYCLE_ACTIVE_TIME = 15 * 60 * 1000;
             config.CYCLE_REST_TIME = 10 * 60 * 1000;
             await ctx.reply(`✅ *Установлен режим: 15 мин активен / 10 мин отдых*`, { parse_mode: 'Markdown' });
@@ -965,7 +1003,7 @@ class TelegramBot {
         });
 
         this.bot.action('set_cycle_20', async (ctx) => {
-            await ctx.answerCbQuery('🔴 20/10');
+            await this.safeAnswer(ctx, '🔴 20/10');
             config.CYCLE_ACTIVE_TIME = 20 * 60 * 1000;
             config.CYCLE_REST_TIME = 10 * 60 * 1000;
             await ctx.reply(`✅ *Установлен режим: 20 мин активен / 10 мин отдых*`, { parse_mode: 'Markdown' });
@@ -973,7 +1011,7 @@ class TelegramBot {
         });
 
         this.bot.action('set_cycle_30', async (ctx) => {
-            await ctx.answerCbQuery('🟣 30/15');
+            await this.safeAnswer(ctx, '🟣 30/15');
             config.CYCLE_ACTIVE_TIME = 30 * 60 * 1000;
             config.CYCLE_REST_TIME = 15 * 60 * 1000;
             await ctx.reply(`✅ *Установлен режим: 30 мин активен / 15 мин отдых*`, { parse_mode: 'Markdown' });
@@ -982,7 +1020,7 @@ class TelegramBot {
 
         // === АВТОРИЗАЦИЯ ===
         this.bot.action('auth_qr', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
             if (!state || !state.phone) {
@@ -994,7 +1032,7 @@ class TelegramBot {
         });
 
         this.bot.action('auth_code', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
             if (!state || !state.phone) {
@@ -1009,6 +1047,12 @@ class TelegramBot {
         });
 
         this.bot.action('auth_ready', async (ctx) => {
+            try {
+                await ctx.answerCbQuery();
+            } catch (error) {
+                console.log('⚠️ Callback устарел, продолжаем...');
+            }
+            
             try {
                 const userId = ctx.from.id;
                 const state = this.userStates.get(userId);
@@ -1097,7 +1141,7 @@ class TelegramBot {
         });
 
         this.bot.action('auth_show_qr', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
             if (!state || !state.phone) {
@@ -1108,7 +1152,7 @@ class TelegramBot {
         });
 
         this.bot.action('auth_cancel', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             const userId = ctx.from.id;
             const state = this.userStates.get(userId);
             if (state && state.phone) {
@@ -1122,19 +1166,18 @@ class TelegramBot {
             await ctx.reply('❌ Отменено', this.getMainKeyboard());
         });
 
-        // Управление аккаунтом
+        // === УПРАВЛЕНИЕ АККАУНТОМ ===
         this.bot.action(/^account_(.+)/, async (ctx) => {
+            await this.safeAnswer(ctx);
             const phone = ctx.match[1];
             const userId = ctx.from.id;
             
             const account = await this.db.getAccount(phone, userId);
             if (!account) {
-                await ctx.answerCbQuery('❌ Аккаунт не найден');
                 await ctx.reply('❌ Аккаунт не принадлежит вам');
                 return;
             }
             
-            await ctx.answerCbQuery();
             const status = account.is_authenticated ? '🟢 авторизован' : '🔴 не авторизован';
             
             await ctx.reply(
@@ -1154,17 +1197,15 @@ class TelegramBot {
         });
 
         this.bot.action(/^auth_phone_(.+)_qr$/, async (ctx) => {
+            await this.safeAnswer(ctx, '📱 Запускаю авторизацию...');
             const phone = ctx.match[1];
             const userId = ctx.from.id;
             
             const account = await this.db.getAccount(phone, userId);
             if (!account) {
-                try { await ctx.answerCbQuery('❌ Аккаунт не найден'); } catch (e) {}
                 await ctx.reply('❌ Аккаунт не принадлежит вам');
                 return;
             }
-            
-            try { await ctx.answerCbQuery('📱 Запускаю авторизацию...'); } catch (e) {}
             
             this.userStates.set(userId, { phone, step: 'waiting_auth', name: account.name || 'WhatsApp' });
             await ctx.reply('📱 Запускаю авторизацию через QR-код...');
@@ -1172,17 +1213,15 @@ class TelegramBot {
         });
 
         this.bot.action(/^auth_phone_(.+)_code$/, async (ctx) => {
+            await this.safeAnswer(ctx, '🔢 Запускаю авторизацию...');
             const phone = ctx.match[1];
             const userId = ctx.from.id;
             
             const account = await this.db.getAccount(phone, userId);
             if (!account) {
-                try { await ctx.answerCbQuery('❌ Аккаунт не найден'); } catch (e) {}
                 await ctx.reply('❌ Аккаунт не принадлежит вам');
                 return;
             }
-            
-            try { await ctx.answerCbQuery('🔢 Запускаю авторизацию...'); } catch (e) {}
             
             this.userStates.set(userId, { phone, step: 'waiting_auth', name: account.name || 'WhatsApp' });
             await ctx.reply('🔢 *Генерация 8-значного кода...*\n\n⏳ Пожалуйста, подождите...', { parse_mode: 'Markdown' });
@@ -1190,10 +1229,9 @@ class TelegramBot {
         });
 
         this.bot.action(/delete_(.+)/, async (ctx) => {
+            await this.safeAnswer(ctx, '🗑️ Удаление...');
             const phone = ctx.match[1];
             const userId = ctx.from.id;
-            
-            try { await ctx.answerCbQuery('🗑️ Удаление...'); } catch (e) {}
             
             try {
                 const account = await this.db.getAccount(phone, userId);
@@ -1214,11 +1252,14 @@ class TelegramBot {
         });
 
         this.bot.action('back_main', async (ctx) => {
-            await ctx.answerCbQuery();
+            await this.safeAnswer(ctx);
             await ctx.reply('Главное меню:', this.getMainKeyboard());
         });
     }
 
+    // ============================================
+    // АВТОРИЗАЦИЯ WHATSAPP
+    // ============================================
     async startAuth(ctx, phone, name, method = 'qr') {
         try {
             console.log(`🔐 Авторизация ${phone} (метод: ${method})`);
@@ -1255,7 +1296,7 @@ class TelegramBot {
                         await ctx.replyWithPhoto(
                             { source: qr },
                             { 
-                                caption: `📱 *QR код для ${phone}*\nОтсканируйте в WhatsApp Web`,
+                                caption: `📱 *QR код para ${phone}*\nОтсканируйте в WhatsApp Web`,
                                 parse_mode: 'Markdown',
                                 ...this.getAuthKeyboard()
                             }
@@ -1271,7 +1312,7 @@ class TelegramBot {
                 try {
                     const code = await client.requestPairingCode(phone);
                     await ctx.reply(
-                        `🔢 *Ваш 8-значный код для ${phone}:*\n\n` +
+                        `🔢 *Ваш 8-значный код para ${phone}:*\n\n` +
                         `\`${code}\`\n\n` +
                         `📱 *Инструкция:*\n` +
                         `1️⃣ Откройте WhatsApp на телефоне\n` +
@@ -1308,7 +1349,7 @@ class TelegramBot {
                 const reason = data?.reason || 'Неизвестно';
                 const isBan = data?.isBan || false;
                 console.log(`🔴 ${phone} отключен: ${reason}`);
-                let message = `⚠️ *Сессия истекла для ${phone}!*\n\n`;
+                let message = `⚠️ *Сессия истекла para ${phone}!*\n\n`;
                 if (isBan) {
                     message += `🚫 Аккаунт забанен!\n📌 Причина: ${reason}`;
                 } else {
@@ -1351,6 +1392,9 @@ class TelegramBot {
         }
     }
 
+    // ============================================
+    // ЗАПУСК И ОСТАНОВКА
+    // ============================================
     async start() {
         try {
             console.log('🚀 Запуск бота...');
