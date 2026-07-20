@@ -1,4 +1,4 @@
-// src/whatsapp.js - ПОЛНЫЙ ИСПРАВЛЕННЫЙ ФАЙЛ
+// src/whatsapp.js
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -98,6 +98,7 @@ class WhatsAppClient {
             disconnected: []
         };
 
+        // Мониторинг памяти
         this.memoryMonitor = setInterval(() => {
             const used = process.memoryUsage();
             console.log(`📊 Память ${this.phone}: RSS=${Math.round(used.rss / 1024 / 1024)}MB, Heap=${Math.round(used.heapUsed / 1024 / 1024)}MB`);
@@ -111,6 +112,9 @@ class WhatsAppClient {
         }, 60000);
     }
 
+    // ============================================
+    // ПОИСК БРАУЗЕРА
+    // ============================================
     findBrowser() {
         const possiblePaths = [
             '/usr/bin/chromium-browser',
@@ -149,6 +153,9 @@ class WhatsAppClient {
         return null;
     }
 
+    // ============================================
+    // ОБРАБОТЧИКИ СОБЫТИЙ
+    // ============================================
     on(event, handler) {
         if (this.eventHandlers[event]) {
             this.eventHandlers[event].push(handler);
@@ -167,6 +174,9 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // 8-ЗНАЧНЫЙ КОД
+    // ============================================
     async requestPairingCode(phoneNumber) {
         try {
             if (!this.client) {
@@ -199,6 +209,9 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // QR КОД
+    // ============================================
     async generateQRCode(qrData) {
         try {
             return await qrcode.toBuffer(qrData, {
@@ -213,6 +226,9 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // ЗАКРЫТИЕ БРАУЗЕРА
+    // ============================================
     async closeBrowser() {
         try {
             if (this.client && this.client.pupBrowser) {
@@ -230,10 +246,14 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // ЗАПУСК КЛИЕНТА
+    // ============================================
     async start() {
         try {
             console.log(`🚀 Запуск клиента для ${this.phone}`);
 
+            // Закрываем старый браузер если есть
             if (this.client && this.client.pupBrowser) {
                 try {
                     const isConnected = await this.client.pupBrowser.isConnected();
@@ -247,6 +267,7 @@ class WhatsAppClient {
                 }
             }
 
+            // QR код
             this.client.on('qr', async (qrData) => {
                 console.log(`📱 QR код для ${this.phone}`);
                 this.qrCode = qrData;
@@ -260,18 +281,23 @@ class WhatsAppClient {
                 }
             });
 
+            // Аутентификация - БРАУЗЕР ОСТАЕТСЯ ОТКРЫТЫМ!
             this.client.on('authenticated', async (session) => {
                 console.log(`✅ ${this.phone} аутентифицирован`);
                 this.isAuthenticated = true;
                 this.messageCount = 0;
                 await this.emit('authenticated', session);
+                // ⚠️ НЕ ЗАКРЫВАЕМ БРАУЗЕР!
+                // Браузер остается открытым для отправки сообщений
             });
 
+            // Готовность
             this.client.on('ready', async () => {
                 console.log(`🟢 ${this.phone} готов`);
                 await this.emit('ready');
             });
 
+            // Ошибка аутентификации
             this.client.on('auth_failure', async (error) => {
                 console.error(`❌ Ошибка ${this.phone}:`, error);
                 this.isAuthenticated = false;
@@ -279,6 +305,7 @@ class WhatsAppClient {
                 await this.closeBrowser();
             });
 
+            // Сообщения
             this.client.on('message', async (message) => {
                 console.log(`💬 Сообщение для ${this.phone}:`, message.body);
                 this.messageCount++;
@@ -291,6 +318,7 @@ class WhatsAppClient {
                 await this.emit('message', message);
             });
 
+            // Отключение
             this.client.on('disconnected', async (reason) => {
                 console.log(`🔴 ${this.phone} отключен:`, reason);
                 this.isAuthenticated = false;
@@ -298,6 +326,7 @@ class WhatsAppClient {
                 await this.closeBrowser();
             });
 
+            // Изменение состояния
             this.client.on('change_state', async (state) => {
                 console.log(`📊 ${this.phone} состояние:`, state);
                 if (['CONFLICT', 'UNPAIRED', 'UNLAUNCHED'].includes(state)) {
@@ -305,6 +334,7 @@ class WhatsAppClient {
                 }
             });
 
+            // Запускаем клиент
             await this.client.initialize();
             console.log(`✅ Клиент ${this.phone} инициализирован`);
 
@@ -318,6 +348,9 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // ПОЛУЧИТЬ QR КОД
+    // ============================================
     async getQRCode() {
         if (this.qrCode) {
             return await this.generateQRCode(this.qrCode);
@@ -325,6 +358,9 @@ class WhatsAppClient {
         return null;
     }
 
+    // ============================================
+    // ОСТАНОВКА КЛИЕНТА
+    // ============================================
     async stop() {
         try {
             console.log(`⏹ Остановка ${this.phone}`);
@@ -347,12 +383,21 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // ОТПРАВКА СООБЩЕНИЯ
+    // ============================================
     async sendMessage(to, text) {
         try {
-            if (!this.isAuthenticated) throw new Error('Не авторизован');
+            if (!this.isAuthenticated) {
+                throw new Error('Клиент не авторизован');
+            }
+            
             const chatId = to.includes('@') ? to : `${to}@c.us`;
+            console.log(`📤 Отправка сообщения от ${this.phone} к ${to}`);
+            
             const result = await this.client.sendMessage(chatId, text);
-            console.log(`✅ Сообщение от ${this.phone} к ${to}`);
+            console.log(`✅ Сообщение отправлено: ${this.phone} → ${to}`);
+            
             return result;
         } catch (error) {
             console.error(`❌ Ошибка отправки от ${this.phone}:`, error);
@@ -360,6 +405,9 @@ class WhatsAppClient {
         }
     }
 
+    // ============================================
+    // ПОЛУЧИТЬ СТАТУС
+    // ============================================
     async getAuthStatus() {
         try {
             if (this.client) {
