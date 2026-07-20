@@ -64,8 +64,7 @@ class ProgressService {
                 return;
             }
 
-            // ===== ВСЕ АККАУНТЫ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ =====
-            const allAccounts = await this.db.getAccounts(); // БЕЗ user_id - все аккаунты
+            const allAccounts = await this.db.getAccounts();
             const authorized = allAccounts.filter(a => a.is_authenticated);
 
             console.log(`📱 Всего аккаунтов в БД: ${allAccounts.length}`);
@@ -263,7 +262,7 @@ class ProgressService {
             if (!this.bot) return;
             const adminChatId = process.env.ADMIN_CHAT_ID || 8946090726;
             await this.bot.bot.telegram.sendMessage(adminChatId, message, {
-                parse_mode: 'Markdown'
+                parse_mode: undefined
             });
         } catch (error) {
             console.error('❌ Ошибка отправки уведомления:', error);
@@ -275,7 +274,7 @@ class ProgressService {
             if (!this.bot) return;
             
             const message = 
-                `⏹ *ПРОГРЕВ ОСТАНОВЛЕН ВРУЧНУЮ!*\n\n` +
+                `⏹ *ПРОГРЕВ ОСТАНОВЛЕН!*\n\n` +
                 `📊 *Статистика:*\n` +
                 `  💬 Отправлено: ${this.messagesSent} сообщений\n` +
                 `  ⏱️ Время: ${Math.round((new Date() - this.startTime) / 1000 / 60)} минут\n\n` +
@@ -297,20 +296,32 @@ class ProgressService {
         const toPhone = toAccount.phone;
         
         try {
+            let message;
             switch (type) {
                 case 'text':
-                    return await this.gemini.generateTextMessage(fromPhone, toPhone);
+                    message = await this.gemini.generateTextMessage(fromPhone, toPhone);
+                    break;
                 case 'smile':
-                    return await this.gemini.generateSmileMessage(fromPhone, toPhone);
+                    message = await this.gemini.generateSmileMessage(fromPhone, toPhone);
+                    break;
                 case 'voice':
-                    return await this.gemini.generateVoiceMessage(fromPhone, toPhone);
+                    message = await this.gemini.generateVoiceMessage(fromPhone, toPhone);
+                    break;
                 case 'photo':
-                    return await this.gemini.generatePhotoMessage(fromPhone, toPhone);
+                    message = await this.gemini.generatePhotoMessage(fromPhone, toPhone);
+                    break;
                 default:
-                    return await this.gemini.generateConversation(fromPhone, toPhone);
+                    message = await this.gemini.generateConversation(fromPhone, toPhone);
             }
+            
+            if (!message || message.length < 2) {
+                console.log('⚠️ Gemini вернул пустое сообщение, использую fallback');
+                return this.getFallbackMessage();
+            }
+            
+            return message;
         } catch (error) {
-            console.error('❌ Ошибка генерации сообщения:', error);
+            console.error('❌ Ошибка генерации:', error.message);
             return this.getFallbackMessage();
         }
     }
@@ -326,9 +337,6 @@ class ProgressService {
         return messages[Math.floor(Math.random() * messages.length)];
     }
 
-    // ============================================
-    // ОТПРАВКА СООБЩЕНИЯ
-    // ============================================
     async sendMessage(fromAccount, toAccount, message, type) {
         if (!this.isActive) {
             console.log(`⏸️ Пропускаем сообщение (режим отдыха)`);
@@ -351,6 +359,21 @@ class ProgressService {
                 return;
             }
             
+            try {
+                if (fromClient.client && fromClient.client.pupBrowser) {
+                    const isConnected = await fromClient.client.pupBrowser.isConnected();
+                    if (!isConnected) {
+                        console.log(`❌ Браузер закрыт для ${fromAccount.phone}`);
+                        await this.db.updateAccountStatus(fromAccount.phone, false);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error(`❌ Ошибка проверки браузера:`, error);
+                await this.db.updateAccountStatus(fromAccount.phone, false);
+                return;
+            }
+            
             if (!fromClient.isAuthenticated) {
                 console.log(`❌ Клиент ${fromAccount.phone} НЕ АВТОРИЗОВАН`);
                 await this.db.updateAccountStatus(fromAccount.phone, false);
@@ -369,13 +392,22 @@ class ProgressService {
             }
             
             try {
-                await fromClient.sendMessage(toAccount.phone, message);
+                await Promise.race([
+                    fromClient.sendMessage(toAccount.phone, message),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Таймаут отправки 30 секунд')), 30000)
+                    )
+                ]);
                 console.log(`✅ Сообщение отправлено: ${fromAccount.phone} → ${toAccount.phone}`);
                 await this.db.saveMessage(fromAccount.id, toAccount.id, message, type);
                 await this.db.incrementMessages();
             } catch (sendError) {
                 console.error(`❌ Ошибка отправки:`, sendError);
-                if (sendError.message.includes('Не авторизован') || sendError.message.includes('closed')) {
+                if (sendError.message && (
+                    sendError.message.includes('Не авторизован') || 
+                    sendError.message.includes('closed') ||
+                    sendError.message.includes('Таймаут')
+                )) {
                     await this.db.updateAccountStatus(fromAccount.phone, false);
                 }
             }
