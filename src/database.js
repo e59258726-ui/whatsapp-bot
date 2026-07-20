@@ -35,6 +35,7 @@ class Database {
         try {
             const client = await this.pool.connect();
 
+            // Таблица аккаунтов
             await client.query(`
                 CREATE TABLE IF NOT EXISTS accounts (
                     id SERIAL PRIMARY KEY,
@@ -47,6 +48,7 @@ class Database {
                 )
             `);
 
+            // Таблица пар
             await client.query(`
                 CREATE TABLE IF NOT EXISTS pairs (
                     id SERIAL PRIMARY KEY,
@@ -59,6 +61,7 @@ class Database {
                 )
             `);
 
+            // Таблица сообщений
             await client.query(`
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
@@ -66,12 +69,14 @@ class Database {
                     from_account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
                     to_account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
                     content TEXT NOT NULL,
+                    type VARCHAR(20) DEFAULT 'text',
                     sent_at TIMESTAMP DEFAULT NOW(),
                     is_delivered BOOLEAN DEFAULT FALSE,
                     is_read BOOLEAN DEFAULT FALSE
                 )
             `);
 
+            // Таблица статистики
             await client.query(`
                 CREATE TABLE IF NOT EXISTS stats (
                     id SERIAL PRIMARY KEY,
@@ -83,6 +88,7 @@ class Database {
                 )
             `);
 
+            // Таблица настроек
             await client.query(`
                 CREATE TABLE IF NOT EXISTS settings (
                     key VARCHAR(50) PRIMARY KEY,
@@ -99,6 +105,9 @@ class Database {
         }
     }
 
+    // ============================================
+    // РАБОТА С АККАУНТАМИ
+    // ============================================
     async addAccount(phone, name = 'WhatsApp') {
         try {
             const client = await this.pool.connect();
@@ -154,6 +163,21 @@ class Database {
         }
     }
 
+    async deleteAccount(phone) {
+        try {
+            const client = await this.pool.connect();
+            await client.query('DELETE FROM accounts WHERE phone = $1', [phone]);
+            client.release();
+            console.log(`✅ Аккаунт ${phone} удален`);
+        } catch (error) {
+            console.error('❌ Ошибка удаления аккаунта:', error);
+            throw error;
+        }
+    }
+
+    // ============================================
+    // РАБОТА С ПАРАМИ (АВТОМАТИЧЕСКИ)
+    // ============================================
     async getPairs() {
         try {
             const client = await this.pool.connect();
@@ -161,7 +185,11 @@ class Database {
                 SELECT 
                     p.*,
                     a1.phone as phone1,
-                    a2.phone as phone2
+                    a1.id as account1_id,
+                    a1.is_authenticated as auth1,
+                    a2.phone as phone2,
+                    a2.id as account2_id,
+                    a2.is_authenticated as auth2
                 FROM pairs p
                 JOIN accounts a1 ON p.account1_id = a1.id
                 JOIN accounts a2 ON p.account2_id = a2.id
@@ -183,14 +211,80 @@ class Database {
                 [account1Id, account2Id]
             );
             client.release();
-            console.log(`✅ Пара создана: ${account1Id} ↔ ${account2Id}`);
-            return result.rows[0];
+            if (result.rows.length > 0) {
+                console.log(`✅ Пара создана: ${account1Id} ↔ ${account2Id}`);
+            }
+            return result.rows[0] || null;
         } catch (error) {
             console.error('❌ Ошибка создания пары:', error);
             throw error;
         }
     }
 
+    async updatePairStatus(pairId, isActive) {
+        try {
+            const client = await this.pool.connect();
+            await client.query(
+                'UPDATE pairs SET is_active = $1, updated_at = NOW() WHERE id = $2',
+                [isActive, pairId]
+            );
+            client.release();
+            console.log(`✅ Статус пары ${pairId} обновлен: ${isActive}`);
+        } catch (error) {
+            console.error('❌ Ошибка обновления пары:', error);
+            throw error;
+        }
+    }
+
+    async deletePair(pairId) {
+        try {
+            const client = await this.pool.connect();
+            await client.query('DELETE FROM pairs WHERE id = $1', [pairId]);
+            client.release();
+            console.log(`✅ Пара ${pairId} удалена`);
+        } catch (error) {
+            console.error('❌ Ошибка удаления пары:', error);
+            throw error;
+        }
+    }
+
+    // ============================================
+    // РАБОТА С СООБЩЕНИЯМИ
+    // ============================================
+    async saveMessage(pairId, fromAccountId, toAccountId, content, type = 'text') {
+        try {
+            const client = await this.pool.connect();
+            const result = await client.query(
+                `INSERT INTO messages (pair_id, from_account_id, to_account_id, content, type) 
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [pairId, fromAccountId, toAccountId, content, type]
+            );
+            client.release();
+            return result.rows[0];
+        } catch (error) {
+            console.error('❌ Ошибка сохранения сообщения:', error);
+            throw error;
+        }
+    }
+
+    async getMessages(pairId, limit = 50) {
+        try {
+            const client = await this.pool.connect();
+            const result = await client.query(
+                `SELECT * FROM messages WHERE pair_id = $1 ORDER BY sent_at DESC LIMIT $2`,
+                [pairId, limit]
+            );
+            client.release();
+            return result.rows;
+        } catch (error) {
+            console.error('❌ Ошибка получения сообщений:', error);
+            throw error;
+        }
+    }
+
+    // ============================================
+    // СТАТИСТИКА
+    // ============================================
     async getStats(pairId) {
         try {
             const client = await this.pool.connect();
@@ -213,7 +307,10 @@ class Database {
         try {
             const client = await this.pool.connect();
             await client.query(
-                'INSERT INTO stats (pair_id, date, messages_count) VALUES ($1, CURRENT_DATE, $2) ON CONFLICT (pair_id, date) DO UPDATE SET messages_count = stats.messages_count + $2',
+                `INSERT INTO stats (pair_id, date, messages_count) 
+                 VALUES ($1, CURRENT_DATE, $2) 
+                 ON CONFLICT (pair_id, date) 
+                 DO UPDATE SET messages_count = stats.messages_count + $2`,
                 [pairId, count]
             );
             client.release();
@@ -223,6 +320,31 @@ class Database {
         }
     }
 
+    async getTotalStats() {
+        try {
+            const client = await this.pool.connect();
+            const result = await client.query(`
+                SELECT 
+                    COUNT(DISTINCT a.id) as total_accounts,
+                    COUNT(DISTINCT a.id) FILTER (WHERE a.is_authenticated = true) as authenticated_accounts,
+                    COUNT(DISTINCT p.id) as total_pairs,
+                    COUNT(DISTINCT p.id) FILTER (WHERE p.is_active = true) as active_pairs,
+                    SUM(s.messages_count) as total_messages
+                FROM accounts a
+                LEFT JOIN pairs p ON p.account1_id = a.id OR p.account2_id = a.id
+                LEFT JOIN stats s ON s.pair_id = p.id
+            `);
+            client.release();
+            return result.rows[0];
+        } catch (error) {
+            console.error('❌ Ошибка получения общей статистики:', error);
+            throw error;
+        }
+    }
+
+    // ============================================
+    // НАСТРОЙКИ
+    // ============================================
     async getSetting(key) {
         try {
             const client = await this.pool.connect();
@@ -250,6 +372,9 @@ class Database {
         }
     }
 
+    // ============================================
+    // ОТКЛЮЧЕНИЕ
+    // ============================================
     async disconnect() {
         try {
             if (this.pool) {
